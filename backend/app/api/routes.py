@@ -1,4 +1,5 @@
 import random
+from app.evaluation.evaluator import run_evaluation
 from typing import List
 from fastapi import APIRouter, UploadFile, File
 from app.models.schemas import (
@@ -75,3 +76,12 @@ async def ingest_files(files: List[UploadFile] = File(...)):
         "message": f"Αναλύθηκαν {len(filenames)} αρχεία ({', '.join(filenames)}) από το backend!",
         "count": len(filenames),
     }
+
+
+@router.get("/evaluation/run", tags=["Evaluation"])
+async def execute_benchmark(limit: int = 5):
+    async def _call_twin(prompt: str):
+        res = await generate_twin_response(TwinRespondRequest(incoming_message=prompt))
+        return res.model_dump()
+
+    return await run_evaluation(_call_twin, limit=limit)
