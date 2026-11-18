@@ -146,9 +146,13 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ incoming_message: incomingMsg })
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setDraft(data);
         setEditedReply(data.twin_reply);
+      } catch (err) {
+        console.error('Backend request failed:', err);
+        alert('Σφάλμα επικοινωνίας με το backend API.');
       } finally {
         setIsGenerating(false);
       }
