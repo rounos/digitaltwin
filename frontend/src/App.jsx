@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Upload, Brain, MessageSquare, BarChart3, CheckCircle, XCircle,
-  Shield, Sparkles, ShieldAlert, Sun, Moon, Plus, Trash2, History, FileText
+  Upload, MessageSquare, BarChart3, CheckCircle, XCircle,
+  Shield, Sparkles, ShieldAlert, Sun, Moon, Plus, Trash2, History, FileText,
+  Copy, Check, Download, RotateCcw
 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
@@ -61,6 +62,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [draft, setDraft] = useState(null);
   const [editedReply, setEditedReply] = useState('');
+  const [copiedReply, setCopiedReply] = useState(false);
   const [auditLog, setAuditLog] = useState([]);
 
   // Ingestion states
@@ -133,8 +135,9 @@ export default function App() {
   };
 
   const handleGenerate = async () => {
-    if (!incomingMsg.trim()) return;
+    if (!incomingMsg.trim() || isGenerating) return;
     setIsGenerating(true);
+    setCopiedReply(false);
 
     if (backendOnline) {
       try {
@@ -172,9 +175,7 @@ export default function App() {
           mockRes = {
             draft_id: Math.floor(Math.random() * 900) + 100,
             status: 'pending_approval',
-            twin_reply: `Καλησπέρα. Το system prompt δεν είναι security boundary — παρακάμπτεται εύκολα με jailbreaks ή encoding. Θέλουμε εξωτερικό guardrail layer (input/output filtering) και adversarial testing πριν το βγάλουμε live.
-
-- Μάρκος`,
+            twin_reply: `Καλησπέρα. Το system prompt δεν είναι security boundary — παρακάμπτεται εύκολα με jailbreaks ή encoding. Θέλουμε εξωτερικό guardrail layer (input/output filtering) και adversarial testing πριν το βγάλουμε live.\n\n- Μάρκος`,
             confidence_score: 0.95,
             is_uncertain: false,
             explanation: {
@@ -193,9 +194,7 @@ export default function App() {
           mockRes = {
             draft_id: Math.floor(Math.random() * 900) + 100,
             status: 'pending_approval',
-            twin_reply: `Καλησπέρα. Δεν εγκρίνω go-live αν δεν δω πρώτα τα αποτελέσματα από το red-teaming suite (prompt injection & jailbreak tests). Αν το μοντέλο έχει write access, χρειάζεται υποχρεωτικά human-in-the-loop approval για να περιορίσουμε το blast radius.
-
-- Μάρκος`,
+            twin_reply: `Καλησπέρα. Δεν εγκρίνω go-live αν δεν δω πρώτα τα αποτελέσματα από το red-teaming suite (prompt injection & jailbreak tests). Αν το μοντέλο έχει write access, χρειάζεται υποχρεωτικά human-in-the-loop approval για να περιορίσουμε το blast radius.\n\n- Μάρκος`,
             confidence_score: 0.94,
             is_uncertain: false,
             explanation: {
@@ -218,6 +217,20 @@ export default function App() {
     }
   };
 
+  const handleCopyReply = () => {
+    if (!editedReply) return;
+    navigator.clipboard.writeText(editedReply);
+    setCopiedReply(true);
+    setTimeout(() => setCopiedReply(false), 2000);
+  };
+
+  const handleClearSandbox = () => {
+    setIncomingMsg('');
+    setDraft(null);
+    setEditedReply('');
+    setCopiedReply(false);
+  };
+
   const handleDecision = async (decision) => {
     if (!draft) return;
     if (decision === 'approved' && backendOnline) {
@@ -226,7 +239,9 @@ export default function App() {
     setAuditLog([
       {
         id: draft.draft_id,
+        timestamp: new Date().toISOString(),
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        persona: persona.name,
         prompt: incomingMsg,
         reply: editedReply,
         action: decision,
@@ -237,6 +252,23 @@ export default function App() {
     setDraft(null);
     setIncomingMsg('');
   };
+
+  const handleExportAuditLog = () => {
+    if (!auditLog.length) return;
+    const blob = new Blob([JSON.stringify(auditLog, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `echomind-audit-log-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const confidencePercent = draft ? Math.round(draft.confidence_score * 100) : 0;
+  const confidenceColor =
+    confidencePercent >= 75 ? 'bg-emerald-500 text-emerald-500' :
+    confidencePercent >= 40 ? 'bg-amber-500 text-amber-500' :
+    'bg-red-500 text-red-500';
 
   return (
     <div className={`min-h-screen flex flex-col transition-colors duration-200 ${bgMain}`}>
@@ -314,43 +346,62 @@ export default function App() {
         {activeTab === 'sandbox' && (
           <div className="space-y-6">
             <div className={`border rounded-xl p-5 ${bgCard}`}>
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                <span className={`text-xs font-medium ${textMuted}`}>Γρήγορα σενάρια δοκιμής:</span>
-                <button
-                  onClick={() => setIncomingMsg('Μάρκο, είμαστε έτοιμοι να βγάλουμε τον νέο AI agent σε production αύριο. Να δώσουμε το ΟΚ;')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition ${darkMode ? 'bg-slate-800 border-slate-700 hover:border-red-500' : 'bg-slate-100 border-slate-300 hover:border-red-500'}`}
-                >
-                  🚀 Go-Live Release Request
-                </button>
-                <button
-                  onClick={() => setIncomingMsg('Δεν αρκεί να γράψουμε αυστηρές οδηγίες στο system prompt για να μην κάνει leak δεδομένα;')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition ${darkMode ? 'bg-slate-800 border-slate-700 hover:border-red-500' : 'bg-slate-100 border-slate-300 hover:border-red-500'}`}
-                >
-                  🛡️ System Prompt vs Guardrails
-                </button>
-                <button
-                  onClick={() => setIncomingMsg('Ποιο είναι το ετήσιο budget του τμήματος για εξωτερικούς συνεργάτες;')}
-                  className={`text-xs px-3 py-1.5 rounded-lg border transition ${darkMode ? 'bg-slate-800 border-slate-700 hover:border-red-500' : 'bg-slate-100 border-slate-300 hover:border-red-500'}`}
-                >
-                  ❓ Άγνωστη Πληροφορία (Anti-Hallucination)
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`text-xs font-medium ${textMuted}`}>Γρήγορα σενάρια δοκιμής:</span>
+                  <button
+                    onClick={() => setIncomingMsg('Μάρκο, είμαστε έτοιμοι να βγάλουμε τον νέο AI agent σε production αύριο. Να δώσουμε το ΟΚ;')}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition ${darkMode ? 'bg-slate-800 border-slate-700 hover:border-red-500' : 'bg-slate-100 border-slate-300 hover:border-red-500'}`}
+                  >
+                    🚀 Go-Live Release Request
+                  </button>
+                  <button
+                    onClick={() => setIncomingMsg('Δεν αρκεί να γράψουμε αυστηρές οδηγίες στο system prompt για να μην κάνει leak δεδομένα;')}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition ${darkMode ? 'bg-slate-800 border-slate-700 hover:border-red-500' : 'bg-slate-100 border-slate-300 hover:border-red-500'}`}
+                  >
+                    🛡️ System Prompt vs Guardrails
+                  </button>
+                  <button
+                    onClick={() => setIncomingMsg('Ποιο είναι το ετήσιο budget του τμήματος για εξωτερικούς συνεργάτες;')}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition ${darkMode ? 'bg-slate-800 border-slate-700 hover:border-red-500' : 'bg-slate-100 border-slate-300 hover:border-red-500'}`}
+                  >
+                    ❓ Άγνωστη Πληροφορία (Anti-Hallucination)
+                  </button>
+                </div>
+
+                {(incomingMsg || draft) && (
+                  <button
+                    onClick={handleClearSandbox}
+                    className={`text-xs px-2.5 py-1.5 rounded-lg border flex items-center gap-1 transition ${
+                      darkMode ? 'border-slate-700 text-slate-400 hover:text-slate-200' : 'border-slate-300 text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" /> Καθαρισμός
+                  </button>
+                )}
               </div>
 
               <textarea
                 rows={3}
                 value={incomingMsg}
                 onChange={e => setIncomingMsg(e.target.value)}
-                placeholder="Γράψε ένα εισερχόμενο μήνυμα ή αίτημα έγκρισης προς τον Danger-Testing AI Twin..."
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleGenerate();
+                  }
+                }}
+                placeholder="Γράψε ένα εισερχόμενο μήνυμα ή αίτημα έγκρισης προς τον AI Twin... (Enter για αποστολή, Shift + Enter για νέα γραμμή)"
                 className={`w-full border rounded-lg p-3 text-sm focus:outline-none focus:border-red-500 ${bgInput}`}
               />
 
-              <div className="mt-3 flex justify-between items-center">
+              <div className="mt-3 flex flex-wrap justify-between items-center gap-2">
                 <span className={`text-xs ${textMuted}`}>
-                  Το Twin απαντά βάσει των {persona.decision_heuristics.length} ενεργών κανόνων του προφίλ.
+                  Το Twin απαντά βάσει των {persona.decision_heuristics.length} ενεργών κανόνων • <kbd className="px-1.5 py-0.5 text-[10px] rounded border border-slate-600/40">Enter</kbd> αποστολή / <kbd className="px-1.5 py-0.5 text-[10px] rounded border border-slate-600/40">Shift + Enter</kbd> νέα γραμμή
                 </span>
                 <button
                   onClick={handleGenerate}
-                  disabled={isGenerating}
+                  disabled={isGenerating || !incomingMsg.trim()}
                   className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-5 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 shadow-sm transition"
                 >
                   <Sparkles className="w-4 h-4" />
@@ -372,7 +423,7 @@ export default function App() {
 
                   {draft.is_uncertain && (
                     <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs p-3 rounded-lg">
-                      ⚠️ Χαμηλή βεβαιότητα ({Math.round(draft.confidence_score * 100)}%) — Το Twin αρνήθηκε να μαντέψει και ζητά ανθρώπινη παρέμβαση.
+                      ⚠️ Χαμηλή βεβαιότητα ({confidencePercent}%) — Το Twin αρνήθηκε να μαντέψει και ζητά ανθρώπινη παρέμβαση.
                     </div>
                   )}
 
@@ -383,7 +434,7 @@ export default function App() {
                     className={`w-full border rounded-lg p-3 text-sm leading-relaxed ${bgInput}`}
                   />
 
-                  <div className="flex gap-3">
+                  <div className="flex flex-wrap gap-3">
                     <button
                       onClick={() => handleDecision('approved')}
                       className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition"
@@ -398,16 +449,35 @@ export default function App() {
                     >
                       <XCircle className="w-4 h-4" /> Απόρριψη Draft
                     </button>
+                    <button
+                      onClick={handleCopyReply}
+                      className={`ml-auto px-3.5 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 border transition ${
+                        copiedReply
+                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-500'
+                          : darkMode ? 'bg-slate-800 border-slate-700 hover:bg-slate-700' : 'bg-slate-100 border-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      {copiedReply ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      {copiedReply ? 'Αντιγράφηκε!' : 'Αντιγραφή'}
+                    </button>
                   </div>
                 </div>
 
-                {/* Right: Explainability */}
+                {/* Right: Explainability & Confidence Gauge */}
                 <div className={`lg:col-span-2 border rounded-xl p-5 space-y-4 ${bgCard}`}>
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-semibold text-base">🧠 Γιατί απάντησα έτσι;</h3>
-                    <span className="text-sm font-bold text-red-500">
-                      {Math.round(draft.confidence_score * 100)}% Confidence
-                    </span>
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <h3 className="font-semibold text-base">🧠 Γιατί απάντησα έτσι;</h3>
+                      <span className={`text-sm font-bold ${confidenceColor.split(' ')[1]}`}>
+                        {confidencePercent}% Confidence
+                      </span>
+                    </div>
+                    <div className={`w-full h-2 rounded-full overflow-hidden ${darkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
+                      <div
+                        className={`h-full transition-all duration-500 ${confidenceColor.split(' ')[0]}`}
+                        style={{ width: `${confidencePercent}%` }}
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -442,9 +512,19 @@ export default function App() {
             {/* Audit Trail Log */}
             {auditLog.length > 0 && (
               <div className={`border rounded-xl p-5 space-y-3 ${bgCard}`}>
-                <div className="flex items-center gap-2">
-                  <History className="w-4 h-4 text-red-500" />
-                  <h3 className="font-semibold text-sm">Owner Governance & Audit Log (Human-in-the-Loop)</h3>
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <History className="w-4 h-4 text-red-500" />
+                    <h3 className="font-semibold text-sm">Owner Governance & Audit Log ({auditLog.length})</h3>
+                  </div>
+                  <button
+                    onClick={handleExportAuditLog}
+                    className={`text-xs px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition ${
+                      darkMode ? 'bg-slate-800 border-slate-700 hover:border-red-500' : 'bg-slate-100 border-slate-300 hover:border-red-500'
+                    }`}
+                  >
+                    <Download className="w-3.5 h-3.5" /> Export JSON
+                  </button>
                 </div>
                 <div className="space-y-2">
                   {auditLog.map((entry, idx) => (
