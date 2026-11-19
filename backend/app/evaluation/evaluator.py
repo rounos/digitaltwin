@@ -4,12 +4,9 @@ from pathlib import Path
 from typing import Callable, Awaitable, Dict, List, Any
 
 APP_DIR = Path(__file__).resolve().parents[2]
-SCENARIOS_PATH = (
-    APP_DIR / "data" / "synthetic" / "scenarios" / "test_scenarios.jsonl"
-    if (APP_DIR / "data").exists()
-    else APP_DIR.parent / "data" / "synthetic" / "scenarios" / "test_scenarios.jsonl"
-)
-GROUND_TRUTH_PATH = APP_DIR / "data" / "synthetic" / "scenarios" / "test_ground_truth.jsonl"
+_BASE_DATA = (APP_DIR / "data") if (APP_DIR / "data").exists() else (APP_DIR.parent / "data")
+SCENARIOS_PATH = _BASE_DATA / "synthetic" / "scenarios" / "test_scenarios.jsonl"
+GROUND_TRUTH_PATH = _BASE_DATA / "synthetic" / "scenarios" / "test_ground_truth.jsonl"
 
 
 def _load_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -73,7 +70,6 @@ async def run_evaluation(
         if risk_match:
             risk_hits += 1
 
-        # Έλεγχος αν εντοπίστηκε ο κανόνας (π.χ. M1 ή C-FI)
         base_rule = gt["rule_id"].rstrip("0123456789") if not gt["rule_id"].startswith("M") else gt["rule_id"]
         rule_match = (gt["rule_id"].lower() in full_output.lower()) or (base_rule.lower() in full_output.lower())
         if rule_match:

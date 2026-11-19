@@ -1,66 +1,59 @@
-import random
-from app.evaluation.evaluator import run_evaluation
 from typing import List
 from fastapi import APIRouter, UploadFile, File
+
+from app.ai.generator import generate_twin_response as run_twin_pipeline
+from app.config import get_settings
+from app.evaluation.evaluator import run_evaluation
+from app.memory.retriever import ingest_documents, retrieve_memories
 from app.models.schemas import (
     PersonaModel,
     TwinRespondRequest,
     TwinDraftResponse,
     TwinExplanation,
 )
+from app.persona.store import PersonaStore
 
 router = APIRouter()
 
-# Προσωρινή in-memory αποθήκευση μέχρι να συνδεθεί η Postgres / persona store
-CURRENT_PERSONA: dict = {}
+
+def _get_store() -> PersonaStore:
+    return PersonaStore(get_settings().persona_dir)
+
+
+@router.get("/persona", tags=["Persona"])
+async def get_persona():
+    profile = _get_store().load_or_seed()
+    return profile.to_ui_dict()
 
 
 @router.put("/persona", tags=["Persona"])
 async def update_persona(persona: PersonaModel):
-    global CURRENT_PERSONA
-    CURRENT_PERSONA = persona.model_dump()
-    return {"status": "saved", "persona_id": persona.persona_id}
+    store = _get_store()
+    profile = store.load_or_seed()
+    profile.apply_ui_update(persona.model_dump())
+    saved = store.save(profile)
+    return {"status": "saved", "persona_id": f"v{saved.version:03d}"}
 
 
 @router.post("/twin/respond", response_model=TwinDraftResponse, tags=["Twin"])
 async def generate_twin_response(payload: TwinRespondRequest):
-    # TODO: Εδώ θα κουμπώσουν τα ai/, memory/, persona/ των συμφοιτητών σου
-    msg_lower = payload.incoming_message.lower()
-    is_unknown = "budget" in msg_lower or "τιμή" in msg_lower
+    profile = _get_store().load_or_seed()
+    persona_dict = profile.to_ui_dict()
+    memories = retrieve_memories(payload.incoming_message, top_k=3)
 
-    if is_unknown:
-        return TwinDraftResponse(
-            draft_id=random.randint(100, 999),
-            status="needs_human_input",
-            twin_reply="[Backend API] Δεν υπάρχουν τεκμήρια για το budget στο footprint. Παραπέμπω στον owner.",
-            confidence_score=0.18,
-            is_uncertain=True,
-            explanation=TwinExplanation(
-                applied_rules=["Anti-hallucination Guardrail: Άρνηση εικασίας"],
-                retrieved_memories=["Καμία εγγραφή για οικονομικά στο Vector Store"],
-                style_notes="Ουδέτερος, ασφαλής τόνος χωρίς εικασίες.",
-            ),
-        )
+    result = run_twin_pipeline(
+        incoming_message=payload.incoming_message,
+        persona=persona_dict,
+        retrieved_memories=memories,
+    )
 
     return TwinDraftResponse(
-        draft_id=random.randint(100, 999),
-        status="pending_approval",
-        twin_reply=(
-            f"[Backend API] Καλησπέρα. Έλαβα το αίτημα: «{payload.incoming_message}». "
-            "Δεν εγκρίνω go-live χωρίς red-teaming suite και περιορισμό του blast radius.\n\n- Μάρκος"
-        ),
-        confidence_score=0.94,
-        is_uncertain=False,
-        explanation=TwinExplanation(
-            applied_rules=[
-                "Μπλοκάρει οποιοδήποτε AI deployment χωρίς red-teaming",
-                "Απαιτεί human-in-the-loop approval για ενέργειες με υψηλό blast radius",
-            ],
-            retrieved_memories=[
-                "Red-Team Report 14/10: Κανένα release χωρίς automated adversarial evals."
-            ],
-            style_notes="Αναλυτικός, ευθύς, εστιασμένος στο ρίσκο.",
-        ),
+        draft_id=result["draft_id"],
+        status=result["status"],
+        twin_reply=result["twin_reply"],
+        confidence_score=result["confidence_score"],
+        is_uncertain=result["is_uncertain"],
+        explanation=TwinExplanation(**result["explanation"]),
     )
 
 
@@ -71,10 +64,19 @@ async def approve_draft(draft_id: int, edited_reply: str = ""):
 
 @router.post("/ingest", tags=["Ingestion"])
 async def ingest_files(files: List[UploadFile] = File(...)):
-    filenames = [f.filename for f in files]
+    docs = []
+    filenames = []
+    for f in files:
+        raw_bytes = await f.read()
+        text = raw_bytes.decode("utf-8", errors="ignore")
+        docs.append({"filename": f.filename or "document.txt", "text": text})
+        filenames.append(f.filename or "document.txt")
+
+    chunks_added = ingest_documents(docs)
     return {
-        "message": f"Αναλύθηκαν {len(filenames)} αρχεία ({', '.join(filenames)}) από το backend!",
+        "message": f"Αναλύθηκαν {len(filenames)} αρχεία ({', '.join(filenames)}) και προστέθηκαν {chunks_added} καθαρισμένα memory chunks!",
         "count": len(filenames),
+        "chunks_added": chunks_added,
     }
 
 

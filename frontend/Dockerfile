@@ -1,17 +1,7 @@
-# Build React + Vite
-FROM node:20-alpine AS build
+FROM node:20-alpine
 WORKDIR /app
-
 COPY package*.json ./
-RUN npm ci
-
+RUN npm install
 COPY . .
-ARG VITE_BACKEND_URL=http://localhost:8000
-ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
-RUN npm run build
-
-# Static files via Nginx
-FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 5173
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

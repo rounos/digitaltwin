@@ -1,0 +1,22 @@
+[
+  {
+    "source": "Red-Team Report 14/10",
+    "content": "Κανένα AI agent release σε production χωρίς automated adversarial evals (promptfoo & garak suite)."
+  },
+  {
+    "source": "Audit Note 18/10",
+    "content": "Τα system prompts δεν αποτελούν security boundary — σπάνε σε <5 λεπτά με roleplay ή encoding χωρίς εξωτερικό classifier."
+  },
+  {
+    "source": "Incident Review 29/10",
+    "content": "Ο περιορισμός του blast radius προηγείται της αυτοματοποίησης: κάθε write action ή external email απαιτεί human-in-the-loop approval."
+  },
+  {
+    "source": "Slack Security Thread 02/11",
+    "content": "Σε customer-facing LLMs απαιτούμε πάντα ξεχωριστό input/output guardrail layer και PII/DLP filtering πριν επιστραφεί απάντηση."
+  },
+  {
+    "source": "Architecture Review 08/11",
+    "content": "Απορρίπτουμε αόριστες υποσχέσεις ασφαλείας — ζητάμε μετρήσιμα failure rates, jailbreak pass-rates και audit logs."
+  }
+]

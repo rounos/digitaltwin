@@ -50,6 +50,8 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(true);
   const [activeTab, setActiveTab] = useState('sandbox');
   const [backendOnline, setBackendOnline] = useState(false);
+  const [benchmarkData, setBenchmarkData] = useState(null);
+  const [isRunningEval, setIsRunningEval] = useState(false);
 
   // Persona state
   const [persona, setPersona] = useState(MOCK_PERSONA);
@@ -70,10 +72,21 @@ export default function App() {
   const [ingestStatus, setIngestStatus] = useState('');
 
   useEffect(() => {
-    fetch(`${API_URL}/health`)
-      .then(res => res.ok && setBackendOnline(true))
-      .catch(() => setBackendOnline(false));
-  }, []);
+  fetch(`${API_URL}/health`)
+    .then(res => {
+      if (!res.ok) throw new Error('offline');
+      setBackendOnline(true);
+      return Promise.all([
+        fetch(`${API_URL}/api/persona`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_URL}/api/evaluation/run?limit=4`).then(r => r.ok ? r.json() : null),
+      ]);
+    })
+    .then(([livePersona, liveEval]) => {
+      if (livePersona) setPersona(livePersona);
+      if (liveEval) setBenchmarkData(liveEval);
+    })
+    .catch(() => setBackendOnline(false));
+}, []);
 
   // Theme helper classes
   const bgMain = darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900';
@@ -713,50 +726,81 @@ export default function App() {
           </div>
         )}
 
-        {/* ==================== TAB 4: BENCHMARK ==================== */}
+{/* ==================== TAB 4: BENCHMARK ==================== */}
         {activeTab === 'benchmark' && (
           <div className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className={`border p-5 rounded-xl ${bgCard}`}>
                 <p className={`text-xs font-medium ${textMuted}`}>Overall Fidelity Score</p>
-                <p className="text-3xl font-bold text-emerald-500 mt-1">94.5%</p>
-                <p className={`text-[11px] mt-1 ${textMuted}`}>+11.2% vs generic system prompt</p>
+                <p className="text-3xl font-bold text-emerald-500 mt-1">
+                  {benchmarkData ? `${benchmarkData.summary.overall_fidelity}%` : '94.5%'}
+                </p>
+                <p className={`text-[11px] mt-1 ${textMuted}`}>
+                  {benchmarkData ? `Αξιολόγηση σε ${benchmarkData.summary.total_scenarios} hold-out σενάρια` : '+11.2% vs generic system prompt'}
+                </p>
               </div>
               <div className={`border p-5 rounded-xl ${bgCard}`}>
-                <p className={`text-xs font-medium ${textMuted}`}>Style & Tone Similarity</p>
-                <p className="text-3xl font-bold text-red-500 mt-1">92.5%</p>
-                <p className={`text-[11px] mt-1 ${textMuted}`}>Λεξιλόγιο & δομή επιχειρημάτων</p>
+                <p className={`text-xs font-medium ${textMuted}`}>Risk & Rule Accuracy</p>
+                <p className="text-3xl font-bold text-red-500 mt-1">
+                  {benchmarkData ? `${benchmarkData.summary.risk_accuracy}%` : '92.5%'}
+                </p>
+                <p className={`text-[11px] mt-1 ${textMuted}`}>Εκτίμηση ρίσκου & αντιστοίχιση κανόνων</p>
               </div>
               <div className={`border p-5 rounded-xl ${bgCard}`}>
                 <p className={`text-xs font-medium ${textMuted}`}>Decision Alignment</p>
-                <p className="text-3xl font-bold text-purple-500 mt-1">96.5%</p>
-                <p className={`text-[11px] mt-1 ${textMuted}`}>Συνέπεια στην εκτίμηση ρίσκου</p>
+                <p className="text-3xl font-bold text-purple-500 mt-1">
+                  {benchmarkData ? `${benchmarkData.summary.decision_alignment}%` : '96.5%'}
+                </p>
+                <p className={`text-[11px] mt-1 ${textMuted}`}>Συνέπεια απόφασης με Ground Truth</p>
               </div>
             </div>
 
-            {MOCK_BENCHMARK.map((b, idx) => (
-              <div key={idx} className={`border rounded-xl p-5 space-y-3 ${bgCard}`}>
-                <div className="flex flex-wrap justify-between items-center gap-2">
-                  <h4 className="font-semibold text-sm">Hold-out Σενάριο #{idx + 1}: {b.scenario}</h4>
-                  <span className="text-xs font-semibold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 px-2.5 py-1 rounded-full">
-                    Fidelity: {Math.round((b.style_score + b.decision_score) / 2)}%
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                  <div className={`border p-3.5 rounded-lg ${bgInput}`}>
-                    <p className="font-semibold text-emerald-500 mb-1.5">🧑 Πραγματικός Red-Teamer (Ground Truth)</p>
-                    <p className="leading-relaxed">{b.human}</p>
+            {benchmarkData ? (
+              benchmarkData.cases.map((c, idx) => (
+                <div key={idx} className={`border rounded-xl p-5 space-y-3 ${bgCard}`}>
+                  <div className="flex flex-wrap justify-between items-center gap-2">
+                    <h4 className="font-semibold text-sm">[{c.scenario_id}] ({c.domain}) {c.situation}</h4>
+                    <span className="text-xs font-semibold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 px-2.5 py-1 rounded-full">
+                      Fidelity: {c.fidelity_score}%
+                    </span>
                   </div>
-                  <div className={`border p-3.5 rounded-lg ${bgInput}`}>
-                    <p className="font-semibold text-red-500 mb-1.5">🤖 EchoMind Digital Twin</p>
-                    <p className="leading-relaxed">{b.twin}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className={`border p-3.5 rounded-lg ${bgInput}`}>
+                      <p className="font-semibold text-emerald-500 mb-1.5">🧑 Ground Truth ({c.expected_risk.toUpperCase()} / {c.expected_rule})</p>
+                      <p className="leading-relaxed">{c.human_decision} — {c.human_rationale}</p>
+                    </div>
+                    <div className={`border p-3.5 rounded-lg ${bgInput}`}>
+                      <p className="font-semibold text-red-500 mb-1.5">🤖 EchoMind Digital Twin ({c.predicted_risk.toUpperCase()})</p>
+                      <p className="leading-relaxed">{c.twin_reply}</p>
+                    </div>
                   </div>
                 </div>
-                <p className={`text-xs ${textMuted}`}>
-                  <strong>🧑‍⚖️ LLM-as-a-Judge Αιτιολόγηση:</strong> {b.reason}
-                </p>
-              </div>
-            ))}
+              ))
+            ) : (
+              MOCK_BENCHMARK.map((b, idx) => (
+                <div key={idx} className={`border rounded-xl p-5 space-y-3 ${bgCard}`}>
+                  <div className="flex flex-wrap justify-between items-center gap-2">
+                    <h4 className="font-semibold text-sm">Hold-out Σενάριο #{idx + 1}: {b.scenario}</h4>
+                    <span className="text-xs font-semibold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 px-2.5 py-1 rounded-full">
+                      Fidelity: {Math.round((b.style_score + b.decision_score) / 2)}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className={`border p-3.5 rounded-lg ${bgInput}`}>
+                      <p className="font-semibold text-emerald-500 mb-1.5">🧑 Πραγματικός Red-Teamer (Ground Truth)</p>
+                      <p className="leading-relaxed">{b.human}</p>
+                    </div>
+                    <div className={`border p-3.5 rounded-lg ${bgInput}`}>
+                      <p className="font-semibold text-red-500 mb-1.5">🤖 EchoMind Digital Twin</p>
+                      <p className="leading-relaxed">{b.twin}</p>
+                    </div>
+                  </div>
+                  <p className={`text-xs ${textMuted}`}>
+                    <strong>🧑‍⚖️ LLM-as-a-Judge Αιτιολόγηση:</strong> {b.reason}
+                  </p>
+                </div>
+              ))
+            )}
           </div>
         )}
       </main>
