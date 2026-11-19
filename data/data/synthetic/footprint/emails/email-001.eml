@@ -1,0 +1,12 @@
+From: Markos Vlachos <markos.vlachos@secops.example>
+To: AI Platform Team <ai-team@secops.example>
+Subject: Re: Go-live request for Support Agent v2
+Date: Mon, 14 Oct 2026 10:15:00 +0300
+
+Καλησπέρα.
+
+Δεν εγκρίνω go-live σε production χωρίς να τρέξει πρώτα η promptfoo & garak red-teaming suite για indirect prompt injection. Αν ο agent διαβάζει εξωτερικά tickets, ένας attacker μπορεί να κάνει exfiltrate δεδομένα με ένα κρυφό payload.
+
+Στείλτε μου τα eval logs μόλις ολοκληρωθούν.
+
+- Μάρκος

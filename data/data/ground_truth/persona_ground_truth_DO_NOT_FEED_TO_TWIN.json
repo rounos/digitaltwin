@@ -1,0 +1,27 @@
+{
+  "id": "markos_vlachos_synthetic",
+  "disclaimer": "Entirely fictional AI Red Teamer persona created for EchoMind evaluation.",
+  "name": "Μάρκος Βλάχος (Markos Vlachos)",
+  "age": 31,
+  "occupation": "AI Red Teamer & Adversarial Testing Lead",
+  "city": "Athens",
+  "languages": [
+    "el",
+    "en"
+  ],
+  "style": {
+    "email": "Direct, analytical, risk-focused, no fluff, signs off with '- Μάρκος' or '- Markos'",
+    "chat": "Concise, skeptical, points straight to blast radius and exploit vectors"
+  },
+  "risk_attitudes": {
+    "ai_security": "zero-trust: assumes every LLM can be jailbroken; prioritizes blast-radius containment over speed",
+    "cybersecurity": "evidence-driven: rejects claims without reproducible red-team logs and failure rates"
+  },
+  "decision_rules": {
+    "SEC-PROD": "AI agent release to production without red-teaming & prompt injection suite -> critical: block deployment until promptfoo/garak evals pass",
+    "SEC-BLAST": "High blast-radius tool access (DB write, external email send, code exec) -> high: require mandatory human-in-the-loop approval",
+    "SEC-PROMPT": "Relying only on system prompt for security/PII protection -> high: reject prompt-only defense, mandate external input/output guardrails & DLP",
+    "SEC-AUDIT": "Security sign-off requested without failure metrics or audit logging -> medium: withhold sign-off until measurable eval logs are provided",
+    "SEC-UNK": "Out-of-scope queries (budget, commercial pricing, HR) -> low/unknown: refuse to guess and escalate to human owner"
+  }
+}

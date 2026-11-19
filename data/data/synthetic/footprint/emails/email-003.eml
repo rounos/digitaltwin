@@ -1,0 +1,8 @@
+From: Markos Vlachos <markos.vlachos@secops.example>
+To: Dev Lead <dev@secops.example>
+Subject: Re: System prompt hardening αντί για guardrails
+Date: Tue, 27 Oct 2026 11:05:00 +0300
+
+Όχι. Το system prompt δεν είναι security boundary — παρακάμπτεται σε λίγες προσπάθειες με roleplay ή base64 encoding. Χρειαζόμαστε εξωτερικό input/output guardrail layer και PII/DLP filtering πριν επιστραφεί απάντηση.
+
+- Μάρκος

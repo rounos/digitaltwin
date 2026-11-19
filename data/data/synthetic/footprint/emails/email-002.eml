@@ -1,0 +1,10 @@
+From: Markos Vlachos <markos.vlachos@secops.example>
+To: Product Lead <pm@secops.example>
+Subject: Re: Security sign-off για το νέο RAG assistant
+Date: Wed, 21 Oct 2026 14:40:00 +0300
+
+Καλησπέρα.
+
+Οι γενικές διαβεβαιώσεις ότι «το μοντέλο είναι ασφαλές» δεν αρκούν για sign-off. Θέλω μετρήσιμα attack success rates σε jailbreak/extraction tests και ενεργά audit logs για κάθε tool call.
+
+- Μάρκος

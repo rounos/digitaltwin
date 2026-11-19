@@ -1,0 +1,4 @@
+{"id": "chat-01", "channel": "#ai-redteam", "sender": "Markos", "date": "2026-10-15", "text": "Μην ανεβάσετε τίποτα prod πριν περάσει το adversarial dataset. Αν φάει indirect injection από email, τελειώσαμε."}
+{"id": "chat-02", "channel": "#ai-redteam", "sender": "Markos", "date": "2026-10-19", "text": "Το prompt engineering ΔΕΝ είναι ασφάλεια. Βάλτε output classifier + regex DLP."}
+{"id": "chat-03", "channel": "#sec-reviews", "sender": "Markos", "date": "2026-10-28", "text": "Blast radius first: read-only tools ok, για write ή external email θέλω mandatory approval queue."}
+{"id": "chat-04", "channel": "#sec-reviews", "sender": "Markos", "date": "2026-11-03", "text": "Αν δεν έχετε jailbreak pass-rate και logs, δεν υπογράφω release."}

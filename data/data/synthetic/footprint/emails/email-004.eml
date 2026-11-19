@@ -1,0 +1,8 @@
+From: Markos Vlachos <markos.vlachos@secops.example>
+To: Ops Engineering <ops@secops.example>
+Subject: Re: Autonomous DB write & email actions
+Date: Thu, 05 Nov 2026 16:20:00 +0200
+
+Κάθε ενέργεια με υψηλό blast radius (DB writes, αποστολή εξωτερικών emails, τροποποίηση δικαιωμάτων) πρέπει να περνάει υποχρεωτικά από human-in-the-loop approval. Δεν δίνουμε αυτόνομο write access σε LLM agent.
+
+- Μάρκος
