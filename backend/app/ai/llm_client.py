@@ -67,7 +67,11 @@ def _call_anthropic(api_key: str, system_prompt: str, user_prompt: str) -> Optio
             body = json.loads(resp.read().decode("utf-8"))
             text = body["content"][0]["text"]
             return _parse_json_safe(text)
-    except (urllib.error.URLError, KeyError, IndexError, TimeoutError):
+    except urllib.error.HTTPError as e:
+        print(f"[ANTHROPIC HTTP ERROR] {e.code}: {e.read().decode('utf-8', errors='replace')}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[ANTHROPIC ERROR] {e}", flush=True)
         return None
 
 
@@ -85,7 +89,10 @@ def _call_gemini(api_key: str, system_prompt: str, user_prompt: str) -> Optional
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
         method="POST",
     )
     try:
@@ -93,7 +100,11 @@ def _call_gemini(api_key: str, system_prompt: str, user_prompt: str) -> Optional
             body = json.loads(resp.read().decode("utf-8"))
             text = body["candidates"][0]["content"]["parts"][0]["text"]
             return _parse_json_safe(text)
-    except (urllib.error.URLError, KeyError, TimeoutError):
+    except urllib.error.HTTPError as e:
+        print(f"[GEMINI HTTP ERROR] {e.code}: {e.read().decode('utf-8', errors='replace')}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[GEMINI ERROR] {e}", flush=True)
         return None
 
 
@@ -123,5 +134,9 @@ def _call_openai(api_key: str, system_prompt: str, user_prompt: str) -> Optional
             body = json.loads(resp.read().decode("utf-8"))
             text = body["choices"][0]["message"]["content"]
             return _parse_json_safe(text)
-    except (urllib.error.URLError, KeyError, TimeoutError):
+    except urllib.error.HTTPError as e:
+        print(f"[OPENAI HTTP ERROR] {e.code}: {e.read().decode('utf-8', errors='replace')}", flush=True)
+        return None
+    except Exception as e:
+        print(f"[OPENAI ERROR] {e}", flush=True)
         return None
