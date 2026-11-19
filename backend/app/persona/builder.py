@@ -22,7 +22,7 @@ DEFAULT_LIMITS = [
 def build_persona(docs: list[Document], llm: StructuredLLM | None, mask: bool = True, max_chars: int = 12000) -> tuple[PersonaProfile, dict]:
     profile = PersonaProfile(subject=OWNER_NAME, limits=list(DEFAULT_LIMITS))
     profile.source_stats = {t.value: sum(1 for d in docs if d.source_type == t) for t in SourceType}
-    profile.style = stylometry.compute(docs)  # deterministic, always available
+    profile.style = stylometry.compute(docs, owner=OWNER_NAME)  # deterministic, always available
     report = {"llm_calls": 0}
 
     if llm is not None:

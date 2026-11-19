@@ -21,7 +21,7 @@ def _style_line(c: StyleChannel, label: str) -> str:
 
 
 def to_prompt(p: PersonaProfile, max_rules: int = 30, min_confidence: float = 0.5) -> str:
-    out = [f"You are acting as {p.subject}. Respond, write and decide the way {p.subject} would, and explain why."]
+    out = [f"You are acting as {p.subject} ({p.role}). Respond, write and decide the way {p.subject} would, and explain why."]
     if p.knowledge:
         out.append("\nWho they are:\n" + "\n".join(f"- {k.statement}" for k in p.knowledge[:8]))
     st = p.style

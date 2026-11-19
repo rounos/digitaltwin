@@ -14,7 +14,7 @@ _LATIN = re.compile(r"[A-Za-z]")
 _WORD = re.compile(r"[^\W\d_]{4,}", re.UNICODE)
 _SENT = re.compile(r"[.!?;\u037e]+(?:\s|$)|\n+")
 _QUESTION = re.compile(r"[?;\u037e](?:\s|$)")
-_GREET = re.compile(r"^(Hi|Hello|Hey|Dear)\s+[\w.]+(,|!)?", re.I)
+_GREET = re.compile(r"^(Hi|Hello|Hey|Dear|Καλησπέρα|Καλημέρα|Γεια σου|Γεια σας|Αγαπητέ|Αγαπητή)\s+[\w.]+(,|!)?", re.I)
 _STOP = set("that this with have will from your what when they them there their about would could should "
             "και για στο στη την του των ένα μια δεν είναι αλλά πως που και".split())
 
@@ -29,9 +29,10 @@ def _greeting(text: str) -> str | None:
     return f"{m.group(1).capitalize()} <name>{m.group(2) or ''}" if m else None
 
 
-def _signoff(text: str, owner: str = "Eleni") -> str | None:
+def _signoff(text: str, owner: str = "Μάρκος Βλάχος") -> str | None:
+    first_name = owner.split()[0]
     lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-    if len(lines) >= 2 and lines[-1] == owner:
+    if len(lines) >= 2 and lines[-1].lstrip("- ") in (owner, first_name):
         return lines[-2]
     return None
 
@@ -44,12 +45,13 @@ def _shares(items: list[str | None], top: int = 3) -> list[PatternShare]:
     return [PatternShare(pattern=p, share=round(n / len(items), 3)) for p, n in c.most_common(top)]
 
 
-def _core(text: str, owner: str = "Eleni") -> str:
+def _core(text: str, owner: str = "Μάρκος Βλάχος") -> str:
     """Email body without the greeting line and the sign-off block (those are measured separately)."""
+    first_name = owner.split()[0]
     lines = text.strip().splitlines()
     if lines and _GREET.match(lines[0]):
         lines = lines[1:]
-    if len(lines) >= 2 and lines[-1].strip() == owner:
+    if len(lines) >= 2 and lines[-1].strip().lstrip("- ") in (owner, first_name):
         lines = lines[:-2]
     return "\n".join(lines).strip()
 
@@ -88,10 +90,10 @@ def _channel(name: str, texts: list[str], greetings=None, signoffs=None, raw: li
     )
 
 
-def compute(docs: list[Document]) -> StyleProfile:
+def compute(docs: list[Document], owner: str = "Μάρκος Βλάχος") -> StyleProfile:
     emails = [d.text for d in docs if d.source_type == SourceType.EMAIL and d.metadata.get("direction") == "outgoing"]
     chat_lines = [m for d in docs if d.source_type == SourceType.CHAT for m in d.metadata.get("owner_messages", [])]
     return StyleProfile(
-        email=_channel("email", [_core(t) for t in emails], [_greeting(t) for t in emails], [_signoff(t) for t in emails], raw=emails),
+        email=_channel("email", [_core(t, owner) for t in emails], [_greeting(t) for t in emails], [_signoff(t, owner) for t in emails], raw=emails),
         chat=_channel("chat", chat_lines),
     )
