@@ -12,7 +12,7 @@ _REPO_ROOT = _BACKEND_DIR.parent if (_BACKEND_DIR.parent / "data").exists() else
 
 def _resolve_dir(env_var: str, default_rel: str) -> Path:
     val = os.getenv(env_var)
-    if val:
+    if val: 
         return Path(val)
     docker_path = Path("/app") / default_rel
     if docker_path.exists():
