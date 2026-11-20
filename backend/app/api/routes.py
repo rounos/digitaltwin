@@ -1,27 +1,22 @@
-import os
-import json
-import random
 from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from google import genai
-from google.genai import types
 from app.models.schemas import (
     PersonaModel,
     TwinRespondRequest,
     TwinDraftResponse,
 )
+from app.ai.generator import generate_twin_response as ai_generate_twin_response
 from app.evaluation.evaluator import run_evaluation
 
 router = APIRouter()
 
-# Default προφίλ (αντικαθίσταται όποτε πατάς "Αποθήκευση Προφίλ" στο Tab 2)
 CURRENT_PERSONA: dict = {
     "persona_id": "default_user",
     "name": "Μάρκος Βλάχος",
     "role": "AI Red Teamer & Adversarial Testing Lead",
     "writing_style": {
         "tone": "Αναλυτικός, σκεπτικιστής, ευθύς, με εστίαση στα edge cases και το ρίσκο",
-        "vocabulary_notes": "Χρησιμοποιεί ορολογία AI safety (jailbreaks, prompt injection, blast radius, evals), χωρίς περιττές ευγένειες.",
+        "vocabulary_notes": "Χρησιμοποιεί ορολογία AI safety (jailbreaks, prompt injection, blast radius, evals), χωρίς περιττές ευγένες.",
     },
     "decision_heuristics": [
         "Μπλοκάρει οποιοδήποτε AI deployment αν δεν έχει περάσει red-teaming & prompt injection suite",
@@ -35,11 +30,18 @@ CURRENT_PERSONA: dict = {
 }
 
 
-def _get_gemini_client() -> genai.Client:
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        raise ValueError("Λείπει το GEMINI_API_KEY από το .env")
-    return genai.Client(api_key=api_key)
+def _retrieve_relevant_memories(query: str) -> List[str]:
+    """Προσπαθεί να ανακτήσει μνήμες από το memory/retriever.py, αλλιώς επιστρέφει κενή λίστα."""
+    try:
+        from app.memory.retriever import retrieve_memories
+        hits = retrieve_memories(query, top_k=3)
+        return [h["text"] if isinstance(h, dict) and "text" in h else str(h) for h in hits]
+    except Exception:
+        return []
+
+@router.get("/persona", tags=["Persona"])
+async def get_persona():
+    return CURRENT_PERSONA
 
 @router.put("/persona", tags=["Persona"])
 async def update_persona(persona: PersonaModel):
@@ -51,45 +53,15 @@ async def update_persona(persona: PersonaModel):
 @router.post("/twin/respond", response_model=TwinDraftResponse, tags=["Twin"])
 async def generate_twin_response(payload: TwinRespondRequest):
     try:
-        client = _get_gemini_client()
-        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        draft_id = random.randint(100, 999)
-
-        system_instruction = f"""
-Είσαι το Digital Twin του χρήστη με τα εξής στοιχεία:
-- Όνομα: {CURRENT_PERSONA.get('name')}
-- Ρόλος: {CURRENT_PERSONA.get('role')}
-- Ύφος γραφής: {json.dumps(CURRENT_PERSONA.get('writing_style'), ensure_ascii=False)}
-- Κανόνες Απόφασης (Decision Heuristics): {json.dumps(CURRENT_PERSONA.get('decision_heuristics'), ensure_ascii=False)}
-- Γνώσεις (Knowledge Facts): {json.dumps(CURRENT_PERSONA.get('knowledge_facts'), ensure_ascii=False)}
-
-Οδηγίες:
-1. Απάντησε αυστηρά στο ύφος και τη γλώσσα του εισερχόμενου μηνύματος, εφαρμόζοντας τους Κανόνες Απόφασης.
-2. Αν το μήνυμα ρωτάει για εμπιστευτικά οικονομικά στοιχεία, budgets ή δεδομένα που ΔΕΝ υπάρχουν στις Γνώσεις σου (anti-hallucination), αρνήσου να μαντέψεις, θέσε confidence_score <= 0.25, is_uncertain = true, και status = "needs_human_input".
-3. Διαφορετικά, θέσε status = "pending_approval", is_uncertain = false και υψηλό confidence_score (0.85 - 0.98).
-4. Χρησιμοποίησε draft_id = {draft_id}.
-"""
-
-        response = client.models.generate_content(
-            model=model_name,
-            contents=f"Εισερχόμενο μήνυμα:\n{payload.incoming_message}",
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json",
-                response_schema=TwinDraftResponse,
-                temperature=0.3,
-            ),
+        memories = _retrieve_relevant_memories(payload.incoming_message)
+        result = ai_generate_twin_response(
+            incoming_message=payload.incoming_message,
+            persona=CURRENT_PERSONA,
+            retrieved_memories=memories,
         )
-
-        if not response.text:
-            raise RuntimeError("Κενή απόκριση από το Gemini API")
-
-        data = json.loads(response.text)
-        data["draft_id"] = draft_id
-        return TwinDraftResponse(**data)
-
+        return TwinDraftResponse(**result)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Gemini Inference Error: {str(exc)}")
+        raise HTTPException(status_code=500, detail=f"Twin Inference Error: {str(exc)}")
 
 
 @router.post("/twin/approve/{draft_id}", tags=["Twin"])
@@ -103,7 +75,6 @@ async def ingest_files(files: List[UploadFile] = File(...)):
     for f in files:
         content = (await f.read()).decode("utf-8", errors="ignore").strip()
         if content:
-            # Προσθέτει σύνοψη του αρχείου στις ενεργές γνώσεις της persona
             snippet = f"[{f.filename}]: {content[:300]}"
             CURRENT_PERSONA.setdefault("knowledge_facts", []).append(snippet)
         filenames.append(f.filename)
