@@ -24,7 +24,12 @@ app.add_middleware(
 
 @app.get("/health", tags=["System"])
 async def health():
-    return {"status": "ok", "service": "echomind-backend"}
+    return {
+        "status": "ok",
+        "service": "echomind-backend",
+        "gemini_configured": bool(os.getenv("GEMINI_API_KEY")),
+        "model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+    }
 
 
 app.include_router(api_router, prefix="/api")

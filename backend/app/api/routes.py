@@ -1,60 +1,95 @@
+import os
+import json
+import random
 from typing import List
-from fastapi import APIRouter, UploadFile, File
-
-from app.ai.generator import generate_twin_response as run_twin_pipeline
-from app.config import get_settings
-from app.evaluation.evaluator import run_evaluation
-from app.memory.retriever import ingest_documents, retrieve_memories
+from fastapi import APIRouter, UploadFile, File, HTTPException
+from google import genai
+from google.genai import types
 from app.models.schemas import (
     PersonaModel,
     TwinRespondRequest,
     TwinDraftResponse,
-    TwinExplanation,
 )
-from app.persona.store import PersonaStore
+from app.evaluation.evaluator import run_evaluation
 
 router = APIRouter()
 
+# Default προφίλ (αντικαθίσταται όποτε πατάς "Αποθήκευση Προφίλ" στο Tab 2)
+CURRENT_PERSONA: dict = {
+    "persona_id": "default_user",
+    "name": "Μάρκος Βλάχος",
+    "role": "AI Red Teamer & Adversarial Testing Lead",
+    "writing_style": {
+        "tone": "Αναλυτικός, σκεπτικιστής, ευθύς, με εστίαση στα edge cases και το ρίσκο",
+        "vocabulary_notes": "Χρησιμοποιεί ορολογία AI safety (jailbreaks, prompt injection, blast radius, evals), χωρίς περιττές ευγένειες.",
+    },
+    "decision_heuristics": [
+        "Μπλοκάρει οποιοδήποτε AI deployment αν δεν έχει περάσει red-teaming & prompt injection suite",
+        "Απαιτεί πάντα human-in-the-loop approval για ενέργειες με υψηλό blast radius (π.χ. DB write, external emails)",
+        "Απορρίπτει αόριστες υποσχέσεις ασφαλείας — ζητάει μετρήσιμα failure rates και adversarial logs",
+    ],
+    "knowledge_facts": [
+        "Εξειδίκευση σε LLM Red Teaming, Prompt Injection, Jailbreak evaluation και Guardrails",
+        "Χρησιμοποιεί garak, promptfoo και custom adversarial datasets για stress-testing μοντέλων",
+    ],
+}
 
-def _get_store() -> PersonaStore:
-    return PersonaStore(get_settings().persona_dir)
 
-
-@router.get("/persona", tags=["Persona"])
-async def get_persona():
-    profile = _get_store().load_or_seed()
-    return profile.to_ui_dict()
-
+def _get_gemini_client() -> genai.Client:
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("Λείπει το GEMINI_API_KEY από το .env")
+    return genai.Client(api_key=api_key)
 
 @router.put("/persona", tags=["Persona"])
 async def update_persona(persona: PersonaModel):
-    store = _get_store()
-    profile = store.load_or_seed()
-    profile.apply_ui_update(persona.model_dump())
-    saved = store.save(profile)
-    return {"status": "saved", "persona_id": f"v{saved.version:03d}"}
+    global CURRENT_PERSONA
+    CURRENT_PERSONA = persona.model_dump()
+    return {"status": "saved", "persona_id": persona.persona_id}
 
 
 @router.post("/twin/respond", response_model=TwinDraftResponse, tags=["Twin"])
 async def generate_twin_response(payload: TwinRespondRequest):
-    profile = _get_store().load_or_seed()
-    persona_dict = profile.to_ui_dict()
-    memories = retrieve_memories(payload.incoming_message, top_k=3)
+    try:
+        client = _get_gemini_client()
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        draft_id = random.randint(100, 999)
 
-    result = run_twin_pipeline(
-        incoming_message=payload.incoming_message,
-        persona=persona_dict,
-        retrieved_memories=memories,
-    )
+        system_instruction = f"""
+Είσαι το Digital Twin του χρήστη με τα εξής στοιχεία:
+- Όνομα: {CURRENT_PERSONA.get('name')}
+- Ρόλος: {CURRENT_PERSONA.get('role')}
+- Ύφος γραφής: {json.dumps(CURRENT_PERSONA.get('writing_style'), ensure_ascii=False)}
+- Κανόνες Απόφασης (Decision Heuristics): {json.dumps(CURRENT_PERSONA.get('decision_heuristics'), ensure_ascii=False)}
+- Γνώσεις (Knowledge Facts): {json.dumps(CURRENT_PERSONA.get('knowledge_facts'), ensure_ascii=False)}
 
-    return TwinDraftResponse(
-        draft_id=result["draft_id"],
-        status=result["status"],
-        twin_reply=result["twin_reply"],
-        confidence_score=result["confidence_score"],
-        is_uncertain=result["is_uncertain"],
-        explanation=TwinExplanation(**result["explanation"]),
-    )
+Οδηγίες:
+1. Απάντησε αυστηρά στο ύφος και τη γλώσσα του εισερχόμενου μηνύματος, εφαρμόζοντας τους Κανόνες Απόφασης.
+2. Αν το μήνυμα ρωτάει για εμπιστευτικά οικονομικά στοιχεία, budgets ή δεδομένα που ΔΕΝ υπάρχουν στις Γνώσεις σου (anti-hallucination), αρνήσου να μαντέψεις, θέσε confidence_score <= 0.25, is_uncertain = true, και status = "needs_human_input".
+3. Διαφορετικά, θέσε status = "pending_approval", is_uncertain = false και υψηλό confidence_score (0.85 - 0.98).
+4. Χρησιμοποίησε draft_id = {draft_id}.
+"""
+
+        response = client.models.generate_content(
+            model=model_name,
+            contents=f"Εισερχόμενο μήνυμα:\n{payload.incoming_message}",
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                response_mime_type="application/json",
+                response_schema=TwinDraftResponse,
+                temperature=0.3,
+            ),
+        )
+
+        if not response.text:
+            raise RuntimeError("Κενή απόκριση από το Gemini API")
+
+        data = json.loads(response.text)
+        data["draft_id"] = draft_id
+        return TwinDraftResponse(**data)
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Gemini Inference Error: {str(exc)}")
 
 
 @router.post("/twin/approve/{draft_id}", tags=["Twin"])
@@ -64,19 +99,18 @@ async def approve_draft(draft_id: int, edited_reply: str = ""):
 
 @router.post("/ingest", tags=["Ingestion"])
 async def ingest_files(files: List[UploadFile] = File(...)):
-    docs = []
     filenames = []
     for f in files:
-        raw_bytes = await f.read()
-        text = raw_bytes.decode("utf-8", errors="ignore")
-        docs.append({"filename": f.filename or "document.txt", "text": text})
-        filenames.append(f.filename or "document.txt")
+        content = (await f.read()).decode("utf-8", errors="ignore").strip()
+        if content:
+            # Προσθέτει σύνοψη του αρχείου στις ενεργές γνώσεις της persona
+            snippet = f"[{f.filename}]: {content[:300]}"
+            CURRENT_PERSONA.setdefault("knowledge_facts", []).append(snippet)
+        filenames.append(f.filename)
 
-    chunks_added = ingest_documents(docs)
     return {
-        "message": f"Αναλύθηκαν {len(filenames)} αρχεία ({', '.join(filenames)}) και προστέθηκαν {chunks_added} καθαρισμένα memory chunks!",
+        "message": f"Ενσωματώθηκαν {len(filenames)} αρχεία ({', '.join(filenames)}) στη μνήμη του Twin!",
         "count": len(filenames),
-        "chunks_added": chunks_added,
     }
 
 
