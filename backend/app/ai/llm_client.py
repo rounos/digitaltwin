@@ -42,7 +42,7 @@ def _parse_json_safe(text: str) -> Optional[Dict[str, Any]]:
 
 def _call_anthropic(api_key: str, system_prompt: str, user_prompt: str) -> Optional[Dict[str, Any]]:
     model = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-5")
-    url = "[https://api.anthropic.com/v1/messages](https://api.anthropic.com/v1/messages)"
+    url = "https://api.anthropic.com/v1/messages"
     payload = {
         "model": model,
         "max_tokens": 1024,
@@ -75,42 +75,51 @@ def _call_anthropic(api_key: str, system_prompt: str, user_prompt: str) -> Optio
         return None
 
 
+_RETRYABLE_CODES = {429, 500, 503, 504}
+
+
 def _call_gemini(api_key: str, system_prompt: str, user_prompt: str) -> Optional[Dict[str, Any]]:
+    """Χρησιμοποιεί το google-genai SDK μέσω gemini_client.
+    Σε προσωρινά σφάλματα (503 υπερφόρτωση, 429 όριο ρυθμού, 5xx) ξαναδοκιμάζει με αναμονή."""
+    import time
+    from google.genai import errors, types
+    from .gemini_client import get_gemini_client
+
     model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model}:generateContent?key={api_key}"
-    payload = {
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json",
-        },
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            text = body["candidates"][0]["content"]["parts"][0]["text"]
-            return _parse_json_safe(text)
-    except urllib.error.HTTPError as e:
-        print(f"[GEMINI HTTP ERROR] {e.code}: {e.read().decode('utf-8', errors='replace')}", flush=True)
-        return None
-    except Exception as e:
-        print(f"[GEMINI ERROR] {e}", flush=True)
-        return None
+    max_attempts = int(os.getenv("GEMINI_MAX_ATTEMPTS", "4"))
+    delays = [3, 8, 15]  # δευτερόλεπτα πριν από την 2η, 3η, 4η προσπάθεια
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client = get_gemini_client()
+            response = client.models.generate_content(
+                model=model,
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                ),
+            )
+            return _parse_json_safe(response.text or "")
+        except errors.APIError as e:
+            retryable = getattr(e, "code", None) in _RETRYABLE_CODES
+            if retryable and attempt < max_attempts:
+                wait = delays[min(attempt - 1, len(delays) - 1)]
+                print(f"[GEMINI RETRY] {e.code} - προσπάθεια {attempt}/{max_attempts}, νέα προσπάθεια σε {wait}s", flush=True)
+                time.sleep(wait)
+                continue
+            print(f"[GEMINI ERROR] {type(e).__name__}: {e}", flush=True)
+            return None
+        except Exception as e:
+            print(f"[GEMINI ERROR] {type(e).__name__}: {e}", flush=True)
+            return None
+    return None
 
 
 def _call_openai(api_key: str, system_prompt: str, user_prompt: str) -> Optional[Dict[str, Any]]:
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    url = "[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)"
+    url = "https://api.openai.com/v1/chat/completions"
     payload = {
         "model": model,
         "temperature": 0.2,

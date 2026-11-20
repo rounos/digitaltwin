@@ -7,8 +7,10 @@ def get_gemini_client() -> genai.Client:
     if not api_key:
         raise ValueError("Λείπει το GEMINI_API_KEY από το .env")
 
-    # Τα keys που ξεκινούν με AQ. χρησιμοποιούν το Vertex AI Express endpoint
-    if api_key.startswith("AQ."):
+    # Το Google AI Studio δίνει πλέον keys με πρόθεμα "AQ." και για το κανονικό
+    # (δωρεάν) Gemini API, οπότε το πρόθεμα ΔΕΝ δείχνει Vertex AI.
+    # Το Vertex AI Express ενεργοποιείται μόνο ρητά, με GEMINI_USE_VERTEX=true.
+    if os.getenv("GEMINI_USE_VERTEX", "false").lower() in ("1", "true", "yes"):
         return genai.Client(vertexai=True, api_key=api_key)
     return genai.Client(api_key=api_key)
 
