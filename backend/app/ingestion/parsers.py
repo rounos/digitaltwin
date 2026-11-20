@@ -10,8 +10,8 @@ from pathlib import Path
 
 from app.models.documents import Document, SourceType
 
-OWNER_EMAIL = "eleni.markou@aegeanstructures.example"
-OWNER_NAME = "Eleni"
+OWNER_EMAIL = "alexis.eng@example.gr"
+OWNER_NAME = "Αλέξης"
 
 
 def _read_jsonl(path: Path) -> list[dict]:
@@ -43,6 +43,8 @@ def parse_eml(path: Path) -> Document:
 
 
 def parse_emails_dir(directory: Path) -> list[Document]:
+    if not directory.exists():
+        return []
     return [parse_eml(p) for p in sorted(directory.glob("*.eml"))]
 
 
@@ -93,6 +95,8 @@ def parse_note_md(path: Path) -> Document:
 
 
 def parse_notes_dir(directory: Path) -> list[Document]:
+    if not directory.exists():
+        return []
     return [parse_note_md(p) for p in sorted(directory.glob("*.md"))]
 
 
@@ -103,6 +107,8 @@ def parse_document_md(path: Path) -> Document:
 
 
 def parse_documents_dir(directory: Path) -> list[Document]:
+    if not directory.exists():
+        return []
     return [parse_document_md(p) for p in sorted(directory.glob("*.md"))]
 
 

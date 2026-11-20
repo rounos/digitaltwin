@@ -1,3 +1,5 @@
+---
+
 # Blast Radius Containment - 2026-11-05
 
 **Subject:** Human-in-the-Loop Policy

@@ -1,3 +1,4 @@
+---
 # Red-Team Audit Note - 2026-10-14
 
 **Subject:** Production Gate Policy

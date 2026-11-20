@@ -14,10 +14,10 @@ def load_documents(settings: Settings | None = None) -> list[Document]:
     fp = s.footprint_dir
     docs: list[Document] = []
     docs += parsers.parse_emails_dir(fp / "emails")
-    docs += parsers.parse_chats_jsonl(fp / "chats" / "chats.jsonl")
+    if (fp / "chats" / "chats.jsonl").exists():
+        docs += parsers.parse_chats_jsonl(fp / "chats" / "chats.jsonl")
     docs += parsers.parse_notes_dir(fp / "notes")
     docs += parsers.parse_documents_dir(fp / "documents")
-    docs += parsers.parse_history_decisions(s.history_file)
     return docs
 
 

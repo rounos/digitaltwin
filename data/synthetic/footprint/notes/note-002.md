@@ -1,3 +1,5 @@
+---
+
 # Guardrail Architecture Note - 2026-10-27
 
 **Subject:** Prompt-Only Defenses
