@@ -83,7 +83,7 @@ class StyleProfile(BaseModel):
 
 class PersonaProfile(BaseModel):
     subject: str
-    role: str = "AI Red Teamer & Adversarial Testing Lead"
+    role: str = "Δεν έχει προσδιοριστεί"
     version: int = 0
     created_at: dt.datetime | None = None
     source_stats: dict[str, int] = Field(default_factory=dict)
@@ -95,48 +95,47 @@ class PersonaProfile(BaseModel):
     limits: list[str] = Field(default_factory=list)
 
     def to_ui_dict(self) -> dict[str, Any]:
-        """Μετατρέπει το PersonaProfile στη μορφή JSON που περιμένει το React UI."""
-        tone = ", ".join(self.style.tone_notes) if self.style.tone_notes else "Αναλυτικός, ευθύς, risk-focused"
+        """Stable frontend contract, with structured evidence available for inspection."""
+        tone = ", ".join(self.style.tone_notes) or "Δεν έχει εξαχθεί ακόμη ύφος γραφής"
         return {
             "persona_id": f"v{self.version:03d}",
+            "persona_version": self.version,
             "name": self.subject,
             "role": self.role,
             "writing_style": {
                 "tone": tone,
-                "vocabulary_notes": "Ακριβής τεχνική ορολογία βασισμένη στο ψηφιακό αποτύπωμα.",
+                "vocabulary_notes": "Συμπεράσματα μόνο από τα δεδομένα του χρήστη.",
             },
-            "decision_heuristics": [
-                f"IF {r.condition} THEN {r.action} (risk: {r.risk_level})" for r in self.decision_rules
-            ],
+            "decision_heuristics": [self._rule_label(r) for r in self.decision_rules],
             "knowledge_facts": [k.statement for k in self.knowledge],
+            "preferences": [p.statement for p in self.preferences],
+            "source_stats": self.source_stats,
+            "evidence": [{"type": "rule", "text": r.condition, "evidence_ids": r.evidence_ids}
+                         for r in self.decision_rules] +
+                        [{"type": "knowledge", "text": k.statement, "evidence_ids": k.evidence_ids}
+                         for k in self.knowledge],
         }
 
+    @staticmethod
+    def _rule_label(rule: DecisionRule) -> str:
+        if "owner_manual_edit" in rule.evidence_ids:
+            return rule.condition
+        return f"IF {rule.condition} THEN {rule.action} (risk: {rule.risk_level})"
+
     def apply_ui_update(self, payload: dict[str, Any]) -> None:
-        """Ενημερώνει το PersonaProfile από edits του χρήστη στο Tab 2 του UI."""
-        if "name" in payload:
-            self.subject = payload["name"]
-        if "role" in payload:
-            self.role = payload["role"]
-        tone = payload.get("writing_style", {}).get("tone")
+        """Apply owner edits without re-writing unchanged extracted evidence/decisions."""
+        self.subject = (payload.get("name") or self.subject).strip()
+        self.role = (payload.get("role") or self.role).strip()
+        tone = (payload.get("writing_style") or {}).get("tone", "").strip()
         if tone:
-            self.style.tone_notes = [t.strip() for t in tone.split(",") if t.strip()]
+            self.style.tone_notes = [tone]
         if "knowledge_facts" in payload:
-            self.knowledge = [
-                Fact(statement=f, evidence_ids=["manual_ui_edit"]) for f in payload["knowledge_facts"] if f.strip()
-            ]
+            old = {k.statement: k for k in self.knowledge}
+            self.knowledge = [old.get(s, Fact(statement=s, evidence_ids=["owner_manual_edit"]))
+                              for s in dict.fromkeys(payload["knowledge_facts"]) if s.strip()]
         if "decision_heuristics" in payload:
-            updated_rules = []
-            for h in payload["decision_heuristics"]:
-                if not h.strip():
-                    continue
-                updated_rules.append(
-                    DecisionRule(
-                        domain="ai_security",
-                        condition=h.strip(),
-                        action="Enforce rule",
-                        risk_level="high",
-                        confidence=1.0,
-                        evidence_ids=["manual_ui_edit"],
-                    )
-                )
-            self.decision_rules = updated_rules
+            old = {self._rule_label(r): r for r in self.decision_rules}
+            self.decision_rules = [old.get(s, DecisionRule(
+                domain="general", condition=s, action="Owner supplied decision preference",
+                risk_level="varies", confidence=1.0, evidence_ids=["owner_manual_edit"]))
+                for s in dict.fromkeys(payload["decision_heuristics"]) if s.strip()]

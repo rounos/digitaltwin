@@ -4,7 +4,7 @@ import json
 from typing import Type, TypeVar
 from pydantic import BaseModel
 
-from app.ai.llm_client import call_llm_json
+from app.ai.llm_client import call_llm_json, configured_provider
 from app.config import Settings, get_settings
 
 T = TypeVar("T", bound=BaseModel)
@@ -31,6 +31,6 @@ class StructuredLLM:
 
 def get_llm(settings: Settings | None = None) -> StructuredLLM | None:
     s = settings or get_settings()
-    if s.gemini_api_key or s.openai_api_key:
+    if configured_provider() is not None:
         return StructuredLLM(s)
     return None

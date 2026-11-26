@@ -1,6 +1,6 @@
 import random
 from typing import Dict, Any, List
-from .llm_client import call_llm_json
+from .llm_client import call_llm_json, configured_provider
 
 CONFIDENCE_THRESHOLD = 0.45
 
@@ -10,8 +10,8 @@ def build_prompts(
     persona: Dict[str, Any],
     retrieved_memories: List[str],
 ) -> tuple[str, str]:
-    name = persona.get("name", "Μάρκος Βλάχος")
-    role = persona.get("role", "AI Red Teamer")
+    name = persona.get("name", "Χρήστης")
+    role = persona.get("role", "")
     writing_style = persona.get("writing_style", {})
     heuristics = persona.get("decision_heuristics", [])
     facts = persona.get("knowledge_facts", [])
@@ -55,43 +55,20 @@ def build_prompts(
     return system_prompt, user_prompt
 
 
-def _fallback_response(
-    incoming_message: str,
-    persona: Dict[str, Any],
-    retrieved_memories: List[str],
-) -> Dict[str, Any]:
-    """Τοπικό fallback αν δεν υπάρχει ενεργό API key στο .env."""
-    first_name = persona.get("name", "Μάρκος").split()[0]
-    heuristics = persona.get("decision_heuristics", [])
-    msg_lower = incoming_message.lower()
-
-    unknown_triggers = ("budget", "τιμή", "κόστος", "μισθ", "συμβόλαιο", "τιμολόγιο")
-    if any(k in msg_lower for k in unknown_triggers) and not retrieved_memories:
-        return {
-            "twin_reply": f"Δεν έχω δεδομένα στο αποτύπωμά μου για οικονομικά στοιχεία ή εμπορικές συμφωνίες. Παραπέμπω το θέμα στον ίδιο τον {first_name}.",
-            "confidence_score": 0.19,
-            "is_uncertain": True,
-            "explanation": {
-                "applied_rules": ["Anti-hallucination Guardrail: Παραδοχή άγνοιας όταν λείπουν τεκμήρια"],
-                "retrieved_memories": ["Καμία σχετική εγγραφή στο Vector/Memory Store"],
-                "style_notes": "Ουδέτερος, ασφαλής τόνος χωρίς εικασίες.",
-            },
-        }
-
-    applied = heuristics[:2] if heuristics else ["Έλεγχος ρίσκου και blast radius πριν από κάθε έγκριση"]
-    memories_used = retrieved_memories[:2] if retrieved_memories else ["Εφαρμογή βασικού προφίλ χωρίς ειδικό RAG hit"]
-
+def _fallback_response(incoming_message: str, persona: Dict[str, Any], retrieved_memories: List[str]) -> Dict[str, Any]:
+    """A truthful no-API fallback: NEVER invent a confident AI decision."""
     return {
         "twin_reply": (
-            f"Καλησπέρα. Δεν δίνω έγκριση αν δεν ελεγχθούν πρώτα τα edge cases, τα guardrails και τα σχετικά logs. "
-            f"Προχωράμε μόνο με μετρήσιμα τεκμήρια και human-in-the-loop έλεγχο.\n\n- {first_name}"
+            "Η σύνδεση με το AI απέτυχε. Ελέγξτε το κλειδί, την πρόσβαση στο μοντέλο και τα backend logs."
+            if configured_provider() else
+            "Δεν υπάρχει διαθέσιμη σύνδεση με μοντέλο AI. Ορίστε νέο OPENAI_API_KEY στο τοπικό .env."
         ),
-        "confidence_score": 0.91,
-        "is_uncertain": False,
+        "confidence_score": 0.0,
+        "is_uncertain": True,
         "explanation": {
-            "applied_rules": applied,
-            "retrieved_memories": memories_used,
-            "style_notes": persona.get("writing_style", {}).get("tone", "Αναλυτικός, ευθύς"),
+            "applied_rules": [],
+            "retrieved_memories": retrieved_memories,
+            "style_notes": "Η παραγωγή απάντησης δεν εκτελέστηκε (χωρίς LLM).",
         },
     }
 
@@ -134,7 +111,7 @@ def generate_twin_response(
         }
 
     return {
-        "draft_id": random.randint(100, 999),
+        "draft_id": random.randint(100000, 999999),
         "status": "needs_human_input" if result["is_uncertain"] else "pending_approval",
         **result,
     }

@@ -1,5 +1,6 @@
 services:
   db:
+    profiles: ["postgres"] # Optional: not used by the current JSON-backed prototype
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-echomind}
@@ -14,12 +15,19 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-6-luna}
+      - OPENAI_REASONING_EFFORT=${OPENAI_REASONING_EFFORT:-none}
+      - OPENAI_MAX_OUTPUT_TOKENS=${OPENAI_MAX_OUTPUT_TOKENS:-8192}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - DATA_DIR=/app/data
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
     volumes:
       - ./data:/app/data
-    depends_on:
-      - db
 
   frontend:
     build: ./frontend

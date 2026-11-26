@@ -6,21 +6,28 @@ import urllib.error
 from typing import Dict, Any, Optional
 
 
-def call_llm_json(system_prompt: str, user_prompt: str) -> Optional[Dict[str, Any]]:
-    """
-    Καλεί το διαθέσιμο LLM (Anthropic Claude, Gemini ή OpenAI βάσει .env) και επιστρέφει parsed JSON.
-    Αν δεν υπάρχει API key ή αποτύχει η κλήση, επιστρέφει None ώστε να αναλάβει το fallback.
-    """
-    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
+def configured_provider() -> str | None:
+    """Return selected provider only when that provider has a credential."""
+    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+    keys = {
+        "openai": "OPENAI_API_KEY",
+        "gemini": "GEMINI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+    }
+    if provider not in keys:
+        return None
+    return provider if os.getenv(keys[provider], "").strip() else None
 
-    if anthropic_key:
-        return _call_anthropic(anthropic_key, system_prompt, user_prompt)
-    if gemini_key:
-        return _call_gemini(gemini_key, system_prompt, user_prompt)
-    if openai_key:
-        return _call_openai(openai_key, system_prompt, user_prompt)
+
+def call_llm_json(system_prompt: str, user_prompt: str) -> Optional[Dict[str, Any]]:
+    """Invoke the explicitly configured provider; no silent switch to other keys."""
+    provider = configured_provider()
+    if provider == "openai":
+        return _call_openai(os.environ["OPENAI_API_KEY"], system_prompt, user_prompt)
+    if provider == "gemini":
+        return _call_gemini(os.environ["GEMINI_API_KEY"], system_prompt, user_prompt)
+    if provider == "anthropic":
+        return _call_anthropic(os.environ["ANTHROPIC_API_KEY"], system_prompt, user_prompt)
     return None
 
 
@@ -118,34 +125,45 @@ def _call_gemini(api_key: str, system_prompt: str, user_prompt: str) -> Optional
 
 
 def _call_openai(api_key: str, system_prompt: str, user_prompt: str) -> Optional[Dict[str, Any]]:
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    url = "https://api.openai.com/v1/chat/completions"
+    """GPT-6 Luna via OpenAI Responses API; returns parsed JSON without storing replies server-side."""
+    model = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+    url = "https://api.openai.com/v1/responses"
     payload = {
         "model": model,
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
+        "input": [
+            {"role": "system", "content": system_prompt + "\nReturn a single valid JSON object."},
             {"role": "user", "content": user_prompt},
         ],
+        "reasoning": {"effort": os.getenv("OPENAI_REASONING_EFFORT", "none")},
+        "max_output_tokens": int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "8192")),
+        "text": {"format": {"type": "json_object"}},
+        "store": False,
     }
     req = urllib.request.Request(
         url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=90) as resp:
             body = json.loads(resp.read().decode("utf-8"))
-            text = body["choices"][0]["message"]["content"]
-            return _parse_json_safe(text)
-    except urllib.error.HTTPError as e:
-        print(f"[OPENAI HTTP ERROR] {e.code}: {e.read().decode('utf-8', errors='replace')}", flush=True)
+        if body.get("status") not in (None, "completed"):
+            print(f"[OPENAI] Response status: {body.get('status')}", flush=True)
+            return None
+        for output in body.get("output", []):
+            if output.get("type") == "message":
+                for content in output.get("content", []):
+                    if content.get("type") == "output_text":
+                        obj = _parse_json_safe(content.get("text", ""))
+                        if isinstance(obj, dict):
+                            return obj
+        print("[OPENAI] No JSON text found in the Responses API result", flush=True)
         return None
-    except Exception as e:
-        print(f"[OPENAI ERROR] {e}", flush=True)
+    except urllib.error.HTTPError as exc:
+        # Do not print request data, Authorization header or the user-supplied key.
+        print(f"[OPENAI] HTTP {exc.code}; check key, model access, quota and project billing", flush=True)
+        return None
+    except Exception as exc:
+        print(f"[OPENAI] Request failed ({type(exc).__name__}); check network and backend logs", flush=True)
         return None

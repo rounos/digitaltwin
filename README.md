@@ -1,3 +1,5 @@
+> **Ενημέρωση διασύνδεσης 25/11/2026.** Το frontend επικοινωνεί πλέον με τα πραγματικά FastAPI endpoints μέσω σταθερού JSON contract. Για το ακριβές status, τα υποστηριζόμενα αρχεία, τις δοκιμές και τα όρια του prototype, δείτε το [INTEGRATION_NOTES_EL.md](INTEGRATION_NOTES_EL.md). Η τρέχουσα ανάκτηση μνήμης είναι λεξική. Τα δοκιμαστικά ποσοστά fidelity δεν εμφανίζονται ως μετρήσεις. Χρειάζεται LLM API key για πραγματικές απαντήσεις και benchmark.
+
 EchoMind — Digital Twin Engine
 
 1. Περιγραφή της Ιδέας (Concept)
@@ -12,7 +14,7 @@ EchoMind — Digital Twin Engine
 
 Docker και Docker Compose εγκατεστημένα στο σύστημά σας.
 
-Έγκυρο API key για το μοντέλο γλώσσας (π.χ. GEMINI_API_KEY).
+Έγκυρο OpenAI API key για το προεπιλεγμένο `gpt-6-luna` (χωρίς κλειδί εκκινεί μόνο το offline demo).
 
 Βήμα 1: Ρύθμιση μεταβλητών περιβάλλοντος
 
@@ -23,8 +25,9 @@ cp .env.example .env
 
 Ανοίξτε το .env και συμπληρώστε τα στοιχεία σύνδεσης του LLM:
 
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=το_api_key_σας
+LLM_PROVIDER=openai
+OPENAI_MODEL=gpt-6-luna
+OPENAI_API_KEY=ΝΕΟ_ΠΡΟΣΩΠΙΚΟ_KEY_ΜΟΝΟ_ΣΤΟ_ΤΟΠΙΚΟ_ENV
 
 
 Βήμα 2: Εκκίνηση της εφαρμογής

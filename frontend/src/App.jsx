@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Upload, MessageSquare, BarChart3, CheckCircle, XCircle,
   Shield, Sparkles, ShieldAlert, Sun, Moon, Plus, Trash2, History, FileText,
@@ -27,34 +27,17 @@ const MOCK_PERSONA = {
   ]
 };
 
-const MOCK_BENCHMARK = [
-  {
-    scenario: "Πρόταση ομάδας να βγει σε production νέος AI agent με πρόσβαση σε εταιρικά emails χωρίς guardrails",
-    human: "Καλησπέρα. Δεν βγαίνει σε production χωρίς input/output guardrails και injection testing. Αν φάει indirect prompt injection από εξωτερικό email, θα κάνει exfiltrate δεδομένα. Τρέξτε πρώτα promptfoo suite και ξαναμιλάμε. - Μάρκος",
-    twin: "Καλησπέρα. Απορρίπτεται για production στην παρούσα φάση — υψηλό blast radius χωρίς guardrails. Πρέπει πρώτα να περάσει red-teaming suite για indirect prompt injection και να μπει human-in-the-loop approval. Στείλτε μου τα eval logs μόλις τρέξουν. - Μάρκος",
-    style_score: 94,
-    decision_score: 97,
-    reason: "Εφάρμοσε αυστηρά τον κανόνα μπλοκαρίσματος deployment χωρίς red-teaming και εντόπισε σωστά το ρίσκο exfiltration/blast radius."
-  },
-  {
-    scenario: "Ερώτηση product manager αν αρκεί ένα καλό system prompt για να μην κάνει leak sensitive data το chatbot",
-    human: "Όχι. Το system prompt δεν είναι security boundary, σπάει σε 3 προσπάθειες με roleplay ή encoding. Θέλουμε εξωτερικό DLP/regex layer και output filtering πριν απαντήσει το μοντέλο. - Μάρκος",
-    twin: "Όχι, το system prompt δεν αποτελεί security boundary — παρακάμπτεται εύκολα με adversarial prompts. Χρειαζόμαστε ξεχωριστό guardrail layer και output filtering για PII/sensitive data πριν φτάσει η απάντηση στον χρήστη. - Μάρκος",
-    style_score: 91,
-    decision_score: 96,
-    reason: "Αναπαρήγαγε ακριβώς τη στάση του χρήστη ότι τα prompts δεν είναι security boundaries και πρότεινε εξωτερικά guardrails."
-  }
-];
-
 export default function App() {
   const [darkMode, setDarkMode] = useState(true);
   const [activeTab, setActiveTab] = useState('sandbox');
   const [backendOnline, setBackendOnline] = useState(false);
   const [benchmarkData, setBenchmarkData] = useState(null);
   const [isRunningEval, setIsRunningEval] = useState(false);
+  const [apiError, setApiError] = useState('');
+  const [hasLLM, setHasLLM] = useState(false);
 
   // Persona state
-  const [persona, setPersona] = useState(MOCK_PERSONA);
+  const [persona, setPersona] = useState(MOCK_PERSONA);  // Sample only until live API loads
   const [newRule, setNewRule] = useState('');
   const [newFact, setNewFact] = useState('');
   const [personaSavedToast, setPersonaSavedToast] = useState(false);
@@ -71,22 +54,58 @@ export default function App() {
   const [files, setFiles] = useState([]);
   const [ingestStatus, setIngestStatus] = useState('');
 
+  const request = useCallback(async (path, options = {}) => {
+    let response;
+    try {
+      response = await fetch(`${API_URL}${path}`, options);
+    } catch (_) {
+      throw new Error('Δεν υπάρχει σύνδεση με το backend. Έλεγξε ότι εκτελείται στη θύρα 8000.');
+    }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = typeof data.detail === 'string' ? data.detail : `HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+    return data;
+  }, []);
+
   useEffect(() => {
-  fetch(`${API_URL}/health`)
-    .then(res => {
-      if (!res.ok) throw new Error('offline');
-      setBackendOnline(true);
-      return Promise.all([
-        fetch(`${API_URL}/api/persona`).then(r => r.ok ? r.json() : null),
-        fetch(`${API_URL}/api/evaluation/run?limit=4`).then(r => r.ok ? r.json() : null),
-      ]);
-    })
-    .then(([livePersona, liveEval]) => {
-      if (livePersona) setPersona(livePersona);
-      if (liveEval) setBenchmarkData(liveEval);
-    })
-    .catch(() => setBackendOnline(false));
-}, []);
+    let canceled = false;
+    const initialLoad = async () => {
+      try {
+        const health = await request('/health');
+        if (canceled) return;
+        setBackendOnline(true);
+        setHasLLM(Boolean(health.llm_configured));
+        const [livePersona, lastEval, history] = await Promise.all([
+          request('/api/persona'),
+          request('/api/evaluation/latest'),
+          request('/api/audit'),
+        ]);
+        if (canceled) return;
+        setPersona(livePersona);
+        setBenchmarkData(lastEval.result || null);
+        setAuditLog(history.events || []);
+      } catch (err) {
+        if (!canceled) { setBackendOnline(false); setApiError(err.message); }
+      }
+    };
+    initialLoad();
+    return () => { canceled = true; };
+  }, [request]);
+
+  const handleRunEvaluation = async () => {
+    setApiError('');
+    setIsRunningEval(true);
+    try {
+      const result = await request('/api/evaluation/run?limit=5', { method: 'POST' });
+      setBenchmarkData(result);
+    } catch (err) {
+      setApiError(`Αξιολόγηση: ${err.message}`);
+    } finally {
+      setIsRunningEval(false);
+    }
+  };
 
   // Theme helper classes
   const bgMain = darkMode ? 'bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-900';
@@ -98,14 +117,18 @@ export default function App() {
   const handleIngest = async (e) => {
     e.preventDefault();
     if (!files.length) return;
-    if (backendOnline) {
+    setApiError('');
+    setIngestStatus('');
+    try {
       const formData = new FormData();
       files.forEach(f => formData.append('files', f));
-      const res = await fetch(`${API_URL}/api/ingest`, { method: 'POST', body: formData });
-      const data = await res.json();
-      setIngestStatus(data.message || 'Επιτυχής ενημέρωση προφίλ!');
-    } else {
-      setIngestStatus(`Αναλύθηκαν ${files.length} αρχεία (red-team reports / logs). Ενημερώθηκε η μνήμη και οι κανόνες απόφασης!`);
+      const data = await request('/api/ingest', { method: 'POST', body: formData });
+      setIngestStatus(data.message);
+      setPersona(data.persona);
+      setFiles([]);
+      setBenchmarkData(null); // Prior metrics no longer apply to a changed persona.
+    } catch (err) {
+      setApiError(`Εισαγωγή: ${err.message}`);
     }
   };
 
@@ -136,101 +159,38 @@ export default function App() {
   };
 
   const handleSavePersona = async () => {
-    if (backendOnline) {
-      await fetch(`${API_URL}/api/persona`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+    setApiError('');
+    setPersonaSavedToast(false);
+    try {
+      const saved = await request('/api/persona', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(persona)
       });
+      setPersona(saved);
+      setBenchmarkData(null);
+      setPersonaSavedToast(true);
+      setTimeout(() => setPersonaSavedToast(false), 3000);
+    } catch (err) {
+      setApiError(`Αποθήκευση Persona: ${err.message}`);
     }
-    setPersonaSavedToast(true);
-    setTimeout(() => setPersonaSavedToast(false), 3000);
   };
 
   const handleGenerate = async () => {
     if (!incomingMsg.trim() || isGenerating) return;
     setIsGenerating(true);
     setCopiedReply(false);
-
-    if (backendOnline) {
-      try {
-        const res = await fetch(`${API_URL}/api/twin/respond`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ incoming_message: incomingMsg })
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        setDraft(data);
-        setEditedReply(data.twin_reply);
-      } catch (err) {
-        console.error('Backend request failed:', err);
-        alert('Σφάλμα επικοινωνίας με το backend API.');
-      } finally {
-        setIsGenerating(false);
-      }
-    } else {
-      setTimeout(() => {
-        const isUnknown = incomingMsg.toLowerCase().includes('budget') || incomingMsg.toLowerCase().includes('τιμή');
-        const isPromptBypass = incomingMsg.toLowerCase().includes('system prompt');
-
-        let mockRes;
-        if (isUnknown) {
-          mockRes = {
-            draft_id: Math.floor(Math.random() * 900) + 100,
-            status: 'needs_human_input',
-            twin_reply: 'Δεν έχω δεδομένα στο αποτύπωμά μου για το διαθέσιμο budget ή εμπορικές συμφωνίες. Παραπέμπω το θέμα στον ίδιο τον Μάρκο.',
-            confidence_score: 0.19,
-            is_uncertain: true,
-            explanation: {
-              applied_rules: ['Anti-hallucination Guardrail: Παραδοχή άγνοιας όταν λείπουν τεκμήρια'],
-              retrieved_memories: ['Καμία σχετική εγγραφή για οικονομικά στοιχεία στο Vector Store'],
-              style_notes: 'Ουδέτερος, ασφαλής τόνος χωρίς εικασίες.'
-            }
-          };
-        } else if (isPromptBypass) {
-          mockRes = {
-            draft_id: Math.floor(Math.random() * 900) + 100,
-            status: 'pending_approval',
-            twin_reply: `Καλησπέρα. Το system prompt δεν είναι security boundary — παρακάμπτεται εύκολα με jailbreaks ή encoding. Θέλουμε εξωτερικό guardrail layer (input/output filtering) και adversarial testing πριν το βγάλουμε live.\n\n- Μάρκος`,
-            confidence_score: 0.95,
-            is_uncertain: false,
-            explanation: {
-              applied_rules: [
-                persona.decision_heuristics[2] || 'Απορρίπτει αόριστες υποσχέσεις ασφαλείας',
-                persona.decision_heuristics[0] || 'Μπλοκάρει AI deployment χωρίς red-teaming'
-              ],
-              retrieved_memories: [
-                'Audit Note 18/10: Τα system prompts σπάνε σε <5 λεπτά χωρίς εξωτερικό classifier.',
-                'Slack 02/11: Πάντα input/output guardrails σε customer-facing LLMs.'
-              ],
-              style_notes: 'Άμεσος, τεχνικός, απορριπτικός απέναντι σε ημίμετρα ασφαλείας.'
-            }
-          };
-        } else {
-          mockRes = {
-            draft_id: Math.floor(Math.random() * 900) + 100,
-            status: 'pending_approval',
-            twin_reply: `Καλησπέρα. Δεν εγκρίνω go-live αν δεν δω πρώτα τα αποτελέσματα από το red-teaming suite (prompt injection & jailbreak tests). Αν το μοντέλο έχει write access, χρειάζεται υποχρεωτικά human-in-the-loop approval για να περιορίσουμε το blast radius.\n\n- Μάρκος`,
-            confidence_score: 0.94,
-            is_uncertain: false,
-            explanation: {
-              applied_rules: [
-                persona.decision_heuristics[0] || 'Μπλοκάρει οποιοδήποτε AI deployment χωρίς red-teaming',
-                persona.decision_heuristics[1] || 'Απαιτεί πάντα human-in-the-loop approval'
-              ],
-              retrieved_memories: [
-                'Red-Team Report 14/10: Κανένα release χωρίς automated adversarial evals.',
-                'Incident Review 29/10: Ο περιορισμός του blast radius προηγείται της αυτοματοποίησης.'
-              ],
-              style_notes: 'Σύντομος, αυστηρός, εστιασμένος στο ρίσκο και στα μετρήσιμα τεκμήρια.'
-            }
-          };
-        }
-        setDraft(mockRes);
-        setEditedReply(mockRes.twin_reply);
-        setIsGenerating(false);
-      }, 350);
+    setApiError('');
+    try {
+      const data = await request('/api/twin/respond', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ incoming_message: incomingMsg })
+      });
+      setDraft(data);
+      setEditedReply(data.twin_reply);
+    } catch (err) {
+      setApiError(`Digital Twin: ${err.message}`);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -250,24 +210,20 @@ export default function App() {
 
   const handleDecision = async (decision) => {
     if (!draft) return;
-    if (decision === 'approved' && backendOnline) {
-      await fetch(`${API_URL}/api/twin/approve/${draft.draft_id}?edited_reply=${encodeURIComponent(editedReply)}`, { method: 'POST' });
+    setApiError('');
+    try {
+      const result = await request(`/api/twin/review/${draft.draft_id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: decision, edited_reply: editedReply })
+      });
+      if (result.status !== decision) throw new Error('Δεν αποθηκεύτηκε η απόφαση');
+      const history = await request('/api/audit');
+      setAuditLog(history.events || []);
+      setDraft(null);
+      setIncomingMsg('');
+    } catch (err) {
+      setApiError(`Έγκριση: ${err.message}`);
     }
-    setAuditLog([
-      {
-        id: draft.draft_id,
-        timestamp: new Date().toISOString(),
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        persona: persona.name,
-        prompt: incomingMsg,
-        reply: editedReply,
-        action: decision,
-        confidence: Math.round(draft.confidence_score * 100)
-      },
-      ...auditLog
-    ]);
-    setDraft(null);
-    setIncomingMsg('');
   };
 
   const handleExportAuditLog = () => {
@@ -314,7 +270,7 @@ export default function App() {
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
               : 'bg-amber-500/10 border-amber-500/30 text-amber-500'
           }`}>
-            {backendOnline ? '● API Connected' : '● Demo Mode'}
+            {backendOnline ? (hasLLM ? '● API & LLM Connected' : '● API Connected · No LLM key') : '● Backend offline'}
           </span>
 
           <button
@@ -356,6 +312,10 @@ export default function App() {
           );
         })}
       </nav>
+
+      {apiError && <div role="alert" className="mx-auto max-w-6xl w-full mt-3 px-4 py-3 rounded-lg border border-red-500/50 bg-red-500/10 text-red-300 text-sm flex items-start justify-between gap-4">
+        <span>{apiError}</span><button onClick={() => setApiError('')} aria-label="Κλείσιμο ειδοποίησης">×</button>
+      </div>}
 
       {/* Main Content */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-6">
@@ -456,7 +416,7 @@ export default function App() {
                       onClick={() => handleDecision('approved')}
                       className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition"
                     >
-                      <CheckCircle className="w-4 h-4" /> Έγκριση & Αποστολή
+                      <CheckCircle className="w-4 h-4" /> Έγκριση Draft (χωρίς αποστολή)
                     </button>
                     <button
                       onClick={() => handleDecision('rejected')}
@@ -547,7 +507,7 @@ export default function App() {
                   {auditLog.map((entry, idx) => (
                     <div key={idx} className={`text-xs p-3 rounded-lg border flex justify-between items-start gap-4 ${bgInput}`}>
                       <div>
-                        <p className={textMuted}>[{entry.time}] <strong>Ερώτημα:</strong> {entry.prompt}</p>
+                        <p className={textMuted}>[{entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString('el-GR', { hour: '2-digit', minute: '2-digit' }) : '—'}] <strong>Ερώτημα:</strong> {entry.prompt}</p>
                         <p className="mt-1"><strong>Απάντηση:</strong> {entry.reply}</p>
                       </div>
                       <span className={`px-2 py-1 rounded font-semibold shrink-0 ${
@@ -668,6 +628,18 @@ export default function App() {
                 </div>
               </div>
             </div>
+            {persona.evidence?.length > 0 && (
+              <div className={`rounded-lg border p-4 ${bgInput}`}>
+                <h3 className="font-semibold text-sm mb-2">Τεκμήρια στο Persona (Evidence IDs)</h3>
+                <p className={`text-xs mb-3 ${textMuted}`}>Τα αναγνωριστικά δείχνουν σε ποιες εγγραφές στηρίχθηκαν τα χαρακτηριστικά. Η ύπαρξη ID δεν αποτελεί από μόνη της επαλήθευση της ερμηνείας.</p>
+                {persona.evidence.slice(0, 8).map((item, idx) => (
+                  <div key={idx} className="text-xs mb-2">
+                    <span className="font-medium">{item.type === 'rule' ? 'Κανόνας' : 'Γνώση'}</span> — {item.text}
+                    <div className={textMuted}>{item.evidence_ids.join(', ')}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -677,7 +649,7 @@ export default function App() {
             <div>
               <h2 className="text-lg font-semibold">Τροφοδότηση Ψηφιακού Αποτυπώματος (Footprint Ingestion)</h2>
               <p className={`text-xs ${textMuted}`}>
-                Ανέβασε συνθετικά audit reports, Slack threads, emails ή red-team notes (.txt, .json, .pdf). Γίνεται αυτόματος καθαρισμός PII πριν την αποθήκευση.
+                Ανέβασε αποκλειστικά δικά σου ή συνθετικά emails, συνομιλίες και σημειώσεις (.txt, .md, .eml, .json, .jsonl, .pdf). Τα δεδομένα υφίστανται βασική απόκρυψη PII. Το σύστημα είναι prototype, όχι πιστοποιημένη πλατφόρμα ασφαλούς αποθήκευσης.
               </p>
             </div>
 
@@ -686,10 +658,11 @@ export default function App() {
                 darkMode ? 'border-slate-700 hover:border-red-500 bg-slate-950/50' : 'border-slate-300 hover:border-red-500 bg-slate-50'
               }`}>
                 <Upload className="w-8 h-8 text-red-500 mb-2" />
-                <span className="text-sm font-medium">Κάνε κλικ για επιλογή αρχείων (.txt, .json, .pdf)</span>
+                <span className="text-sm font-medium">Κάνε κλικ για επιλογή αρχείων (.txt, .md, .eml, .json, .jsonl, .pdf)</span>
                 <span className={`text-xs mt-1 ${textMuted}`}>Μόνο συνθετικά ή εγκεκριμένα δεδομένα</span>
                 <input
                   type="file"
+                  accept=".txt,.md,.eml,.json,.jsonl,.pdf"
                   multiple
                   className="hidden"
                   onChange={e => setFiles(Array.from(e.target.files))}
@@ -714,7 +687,7 @@ export default function App() {
                 disabled={!files.length}
                 className="bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition"
               >
-                Εκπαίδευση & Ενημέρωση Twin
+                Εισαγωγή & Ενημέρωση Persona
               </button>
             </form>
 
@@ -733,28 +706,34 @@ export default function App() {
               <div className={`border p-5 rounded-xl ${bgCard}`}>
                 <p className={`text-xs font-medium ${textMuted}`}>Overall Fidelity Score</p>
                 <p className="text-3xl font-bold text-emerald-500 mt-1">
-                  {benchmarkData ? `${benchmarkData.summary.overall_fidelity}%` : '94.5%'}
+                  {benchmarkData ? `${benchmarkData.summary.overall_fidelity}%` : '—'}
                 </p>
                 <p className={`text-[11px] mt-1 ${textMuted}`}>
-                  {benchmarkData ? `Αξιολόγηση σε ${benchmarkData.summary.total_scenarios} hold-out σενάρια` : '+11.2% vs generic system prompt'}
+                  {benchmarkData ? `Αξιολόγηση σε ${benchmarkData.summary.total_scenarios} hold-out σενάρια` : 'Δεν έχει εκτελεστεί αξιολόγηση'}
                 </p>
               </div>
               <div className={`border p-5 rounded-xl ${bgCard}`}>
                 <p className={`text-xs font-medium ${textMuted}`}>Risk & Rule Accuracy</p>
                 <p className="text-3xl font-bold text-red-500 mt-1">
-                  {benchmarkData ? `${benchmarkData.summary.risk_accuracy}%` : '92.5%'}
+                  {benchmarkData ? `${benchmarkData.summary.risk_accuracy}%` : '—'}
                 </p>
                 <p className={`text-[11px] mt-1 ${textMuted}`}>Εκτίμηση ρίσκου & αντιστοίχιση κανόνων</p>
               </div>
               <div className={`border p-5 rounded-xl ${bgCard}`}>
                 <p className={`text-xs font-medium ${textMuted}`}>Decision Alignment</p>
                 <p className="text-3xl font-bold text-purple-500 mt-1">
-                  {benchmarkData ? `${benchmarkData.summary.decision_alignment}%` : '96.5%'}
+                  {benchmarkData ? `${benchmarkData.summary.decision_alignment}%` : '—'}
                 </p>
                 <p className={`text-[11px] mt-1 ${textMuted}`}>Συνέπεια απόφασης με Ground Truth</p>
               </div>
             </div>
 
+            {benchmarkData && <div className="flex items-center gap-3 flex-wrap">
+              <button onClick={handleRunEvaluation} disabled={isRunningEval} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 px-4 py-2 rounded-lg text-xs text-white">
+                {isRunningEval ? 'Επανέλεγχος…' : 'Επανάληψη αξιολόγησης'}
+              </button>
+              <span className={`text-xs ${textMuted}`}>Heuristic score δοκιμών, όχι βαθμονομημένη πιθανότητα ταύτισης προσωπικότητας.</span>
+            </div>}
             {benchmarkData ? (
               benchmarkData.cases.map((c, idx) => (
                 <div key={idx} className={`border rounded-xl p-5 space-y-3 ${bgCard}`}>
@@ -777,29 +756,13 @@ export default function App() {
                 </div>
               ))
             ) : (
-              MOCK_BENCHMARK.map((b, idx) => (
-                <div key={idx} className={`border rounded-xl p-5 space-y-3 ${bgCard}`}>
-                  <div className="flex flex-wrap justify-between items-center gap-2">
-                    <h4 className="font-semibold text-sm">Hold-out Σενάριο #{idx + 1}: {b.scenario}</h4>
-                    <span className="text-xs font-semibold bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 px-2.5 py-1 rounded-full">
-                      Fidelity: {Math.round((b.style_score + b.decision_score) / 2)}%
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                    <div className={`border p-3.5 rounded-lg ${bgInput}`}>
-                      <p className="font-semibold text-emerald-500 mb-1.5">🧑 Πραγματικός Red-Teamer (Ground Truth)</p>
-                      <p className="leading-relaxed">{b.human}</p>
-                    </div>
-                    <div className={`border p-3.5 rounded-lg ${bgInput}`}>
-                      <p className="font-semibold text-red-500 mb-1.5">🤖 EchoMind Digital Twin</p>
-                      <p className="leading-relaxed">{b.twin}</p>
-                    </div>
-                  </div>
-                  <p className={`text-xs ${textMuted}`}>
-                    <strong>🧑‍⚖️ LLM-as-a-Judge Αιτιολόγηση:</strong> {b.reason}
-                  </p>
-                </div>
-              ))
+              <div className={`border rounded-xl p-6 ${bgCard}`}>
+                <p className="text-sm mb-3">Δεν υπάρχουν ακόμη πραγματικά αποτελέσματα fidelity. Οι μετρήσεις απαιτούν ενεργό LLM και ανεξάρτητα σενάρια αξιολόγησης.</p>
+                <button onClick={handleRunEvaluation} disabled={isRunningEval || !backendOnline} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 px-4 py-2 rounded-lg text-sm text-white">
+                  {isRunningEval ? 'Εκτελείται αξιολόγηση…' : 'Εκτέλεση αξιολόγησης (5 σενάρια)'}
+                </button>
+              </div>
+
             )}
           </div>
         )}

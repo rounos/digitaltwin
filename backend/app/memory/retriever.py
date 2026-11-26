@@ -5,13 +5,12 @@ from pathlib import Path
 from typing import List, Dict, Any
 from .pii_scrubber import scrub_pii
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
-if not DATA_DIR.exists():
-    # Fallback για τοπική εκτέλεση εκτός Docker (Windows)
-    DATA_DIR = Path(__file__).resolve().parents[2] / "data"
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+from app.config import get_settings
 
-MEMORY_FILE = DATA_DIR / "memories.json"
+# Resolve dynamically so tests, Windows and Docker share the same data-directory contract.
+def _memory_file() -> Path:
+    return get_settings().memories_file
+
 
 DEFAULT_MEMORIES: List[Dict[str, str]] = [
     {
@@ -38,19 +37,20 @@ DEFAULT_MEMORIES: List[Dict[str, str]] = [
 
 
 def _load_memories() -> List[Dict[str, str]]:
-    if not MEMORY_FILE.exists():
+    if not _memory_file().exists():
         _save_memories(DEFAULT_MEMORIES)
         return list(DEFAULT_MEMORIES)
     try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+        with open(_memory_file(), "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data if isinstance(data, list) and data else list(DEFAULT_MEMORIES)
+            return data if isinstance(data, list) else list(DEFAULT_MEMORIES)
     except (json.JSONDecodeError, OSError):
         return list(DEFAULT_MEMORIES)
 
 
 def _save_memories(memories: List[Dict[str, str]]) -> None:
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+    _memory_file().parent.mkdir(parents=True, exist_ok=True)
+    with open(_memory_file(), "w", encoding="utf-8") as f:
         json.dump(memories, f, ensure_ascii=False, indent=2)
 
 
@@ -115,3 +115,7 @@ def ingest_documents(documents: List[Dict[str, str]]) -> int:
 
     _save_memories(memories)
     return added_count
+
+def replace_memories(items: List[Dict[str, str]]) -> None:
+    """Replace demo memories with the owner's uploaded, PII-scrubbed source records."""
+    _save_memories(items)

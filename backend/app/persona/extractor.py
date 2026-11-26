@@ -32,7 +32,8 @@ def render_docs(docs: list[Document], mask: bool, max_chars: int = 12000) -> lis
         extra = ""
         if "data" in d.metadata:
             extra = "\nData: " + json.dumps(d.metadata["data"], ensure_ascii=False)
-        block = f"[{d.id}] ({d.source_type.value}, {d.date.date() if d.date else 'n/a'}) {d.title}\n{text}{extra}\n\n"
+            if mask: extra = mask_pii(extra)[0]
+        block = f"[{d.id}] ({d.source_type.value}, {d.date.date() if d.date else 'n/a'}) {mask_pii(d.title)[0] if mask else d.title}\n{text}{extra}\n\n"
         if cur and len(cur) + len(block) > max_chars:
             batches.append(cur)
             cur = ""
@@ -68,7 +69,7 @@ def merge(profile: PersonaProfile, res: ExtractionResult) -> None:
     fold(profile.knowledge, res.knowledge, lambda x: _key(x.statement))
     fold(profile.preferences, res.preferences, lambda x: _key(x.topic + x.statement))
     fold(profile.risk_attitudes, res.risk_attitudes, lambda x: x.domain + _key(x.stance))
-    fold(profile.decision_rules, res.decision_rules, lambda x: x.domain + _key(x.condition))
+    fold(profile.decision_rules, res.decision_rules, lambda x: x.domain + _key(x.condition) + _key(x.action))
     for n in res.tone_notes:
         if _key(n) not in {_key(t) for t in profile.style.tone_notes}:
             profile.style.tone_notes.append(n)
